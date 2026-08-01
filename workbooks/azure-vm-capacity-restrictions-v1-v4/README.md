@@ -1,8 +1,8 @@
 # Azure VM Capacity Restrictions (v1-v4)
 
-https://img.shields.io/badge/Azure-Monitor-blue
-https://img.shields.io/badge/Azure-Workbook-green
-https://img.shields.io/badge/Azure-Resource%20Graph-orange
+![Azure Monitor](https://img.shields.io/badge/Azure-Monitor-blue)
+![Azure Workbook](https://img.shields.io/badge/Azure-Workbook-green)
+![Azure Resource Graph](https://img.shields.io/badge/Azure-Resource%20Graph-orange)
 
 ## Overview
 
@@ -35,11 +35,24 @@ This workbook provides visibility into:
 
 # Deployment Options
 
-## Option 1 - Import Workbook JSON
+## Option 1 - Deploy to Azure (recommended)
 
-### Download Workbook
+Click the button below to deploy the workbook directly into your Azure subscription. The workbook content is embedded in the ARM template, so it deploys fully populated.
 
-Download
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fbabulalghule24%2Fazure-monitor-observability-hub%2Fmain%2Fworkbooks%2Fazure-vm-capacity-restrictions-v1-v4%2Fazuredeploy.json)
+
+On the custom deployment page:
+
+1. Select a **Subscription** and **Resource group**
+2. Optionally change the **Workbook Display Name**
+3. Click **Review + create**, then **Create**
+4. When deployment completes, open the resource to view the workbook
+
+---
+
+## Option 2 - Import Workbook JSON
+
+### Download
 
 - `workbook.json`
 
@@ -65,21 +78,13 @@ Azure Monitor
 
 ---
 
-## Option 2 - Deploy to Azure
-
-## Deploy to Azure
-
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fbabulalghule24%2Fazure-monitor-observability-hub%2Fmain%2Fworkbooks%2Fazure-vm-capacity-restrictions-v1-v4%2Fazuredeploy.json)
-
----
-
 # Repository Contents
 
 | File | Description |
 |--------|-------------|
 | workbook.json | Workbook definition |
 | README.md | Documentation |
-| azuredeploy.json | ARM deployment template |
+| azuredeploy.json | ARM deployment template (workbook embedded) |
 | azuredeploy.parameters.json | Deployment parameters |
 
 ---
@@ -170,8 +175,8 @@ Resource Graph Reader
 
 # Author
 
-**Babulal Ghule**  
-Cloud Solution Architect  
+**Babulal Ghule**
+Cloud Solution Architect
 Microsoft SfMC
 
 ---
