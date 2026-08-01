@@ -1,0 +1,34 @@
+$workbook = Get-Content ".\workbook.json" -Raw
+
+$template = @{
+    '$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#'
+    contentVersion = '1.0.0.0'
+    parameters = @{
+        workbookDisplayName = @{
+            type = 'string'
+            defaultValue = 'Azure VM Capacity Restrictions (v1-v4)'
+        }
+        workbookType = @{
+            type = 'string'
+            defaultValue = 'workbook'
+        }
+    }
+    resources = @(
+        @{
+            type = 'Microsoft.Insights/workbooks'
+            apiVersion = '2018-06-17-preview'
+            name = "[newGuid()]"
+            location = "[resourceGroup().location]"
+            kind = 'shared'
+            properties = @{
+                displayName = "[parameters('workbookDisplayName')]"
+                version = '1.0'
+                sourceId = 'Azure Monitor'
+                category = "[parameters('workbookType')]"
+                serializedData = $workbook
+            }
+        }
+    )
+}
+
+$template | ConvertTo-Json -Depth 100 | Out-File ".\azuredeploy.json" -Encoding utf8

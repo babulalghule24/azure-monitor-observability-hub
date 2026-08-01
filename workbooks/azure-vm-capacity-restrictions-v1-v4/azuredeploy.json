@@ -4,18 +4,11 @@
   "parameters": {
     "workbookDisplayName": {
       "type": "string",
-      "defaultValue": "Azure VM Capacity Restrictions (v1-v4)",
-      "metadata": {
-        "description": "Workbook display name"
-      }
-    },
-    "workbookType": {
-      "type": "string",
-      "defaultValue": "workbook",
-      "metadata": {
-        "description": "Workbook category"
-      }
+      "defaultValue": "Azure VM Capacity Restrictions (v1-v4)"
     }
+  },
+  "variables": {
+    "workbookContent": "[uri('https://raw.githubusercontent.com/babulalghule24/azure-monitor-observability-hub/main/workbooks/azure-vm-capacity-restrictions-v1-v4/workbook.json','')]"
   },
   "resources": [
     {
@@ -28,8 +21,8 @@
         "displayName": "[parameters('workbookDisplayName')]",
         "version": "1.0",
         "sourceId": "Azure Monitor",
-        "category": "[parameters('workbookType')]",
-        "serializedData": "{}"
+        "category": "workbook",
+        "serializedData": "[string(reference(variables('workbookContent')))]"
       }
     }
   ]

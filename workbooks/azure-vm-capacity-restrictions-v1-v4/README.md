@@ -2,7 +2,7 @@
 
 https://img.shields.io/badge/Azure-Monitor-blue
 https://img.shields.io/badge/Azure-Workbook-green
-![Azure Resourcelds.io/badge/Azure-Resource%20Graph-orange
+https://img.shields.io/badge/Azure-Resource%20Graph-orange
 
 ## Overview
 
@@ -69,9 +69,7 @@ Azure Monitor
 
 ## Deploy to Azure
 
-Click the button below to deploy the workbook directly into your Azure subscription.
-
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fbabulalghule24%2Fazure-monitormain%2Fworkbooks%2Fazure-vm-capacity-restrictions-v1-v4%2Fazuredeploy.json)
+https://aka.ms/deploytoazurebutton](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fbabulalghule24%2Fazure-monitor-observability-hub%2Fmain%2Fworkbooks%2Fazure-vm-capacity-restrictions-v1-v4%2Fazuredeploy.json)
 
 ---
 
