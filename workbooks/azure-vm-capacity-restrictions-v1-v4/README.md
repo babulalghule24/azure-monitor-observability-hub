@@ -69,7 +69,8 @@ Azure Monitor
 
 ## Deploy to Azure
 
-[https://aka.ms/deploytoazurebutton] (https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fbabulalghule24%2Fazure-monitor-observability-hub%2Fmain%2Fworkbooks%2Fazure-vm-capacity-restrictions-v1-v4%2Fazuredeploy.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%ure-monitor-observability-hub%2Fmain%2Fworkbooks%2Fazure-vm-capacity-restrictions-v1-v4%2Fazuredeploy.json)
+
 ---
 
 # Repository Contents
