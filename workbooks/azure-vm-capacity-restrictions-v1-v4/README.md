@@ -2,7 +2,7 @@
 
 https://img.shields.io/badge/Azure-Monitor-blue
 https://img.shields.io/badge/Azure-Workbook-green
-![Azure Resource Graph](https://img.shields.io/badgeorange
+![Azure Resourcelds.io/badge/Azure-Resource%20Graph-orange
 
 ## Overview
 
@@ -35,11 +35,11 @@ This workbook provides visibility into:
 
 # Deployment Options
 
-## Option 1 - Manual Import
+## Option 1 - Import Workbook JSON
 
 ### Download Workbook
 
-Download:
+Download
 
 - `workbook.json`
 
@@ -50,8 +50,8 @@ Download:
 
 ```text
 Azure Monitor
-   → Workbooks
-   → New
+→ Workbooks
+→ New
 ```
 
 3. Select **Advanced Editor (</>)**
@@ -65,21 +65,13 @@ Azure Monitor
 
 ---
 
-## Option 2 - Deploy to Azure (Coming Soon)
+## Option 2 - Deploy to Azure
 
-A one-click deployment experience will be added soon.
+## Deploy to Azure
 
-Files to be added:
+Click the button below to deploy the workbook directly into your Azure subscription.
 
-- azuredeploy.json
-- azuredeploy.parameters.json
-- Deploy to Azure button
-
-Example:
-
-```markdown
-https://aka.ms/deploytoazurebutton](<DEPLOY_URL>)
-```
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fbabulalghule24%2Fazure-monitormain%2Fworkbooks%2Fazure-vm-capacity-restrictions-v1-v4%2Fazuredeploy.json)
 
 ---
 
@@ -89,8 +81,8 @@ https://aka.ms/deploytoazurebutton](<DEPLOY_URL>)
 |--------|-------------|
 | workbook.json | Workbook definition |
 | README.md | Documentation |
-| azuredeploy.json | ARM deployment template (coming soon) |
-| azuredeploy.parameters.json | ARM deployment parameters (coming soon) |
+| azuredeploy.json | ARM deployment template |
+| azuredeploy.parameters.json | Deployment parameters |
 
 ---
 
@@ -175,47 +167,6 @@ Reader
 Monitoring Reader
 Resource Graph Reader
 ```
-
----
-
-# Supported VM Families
-
-## Retiring and Capacity Restricted
-
-- D
-- Ds
-- Dv2
-- Dsv2
-- Av2
-- Amv2
-- B
-- Bs
-- F
-- Fs
-- Fsv2
-- G
-- Gs
-- Ls
-- Lsv2
-
-## Growth Controlled
-
-- Dv3
-- Dsv3
-- Dv4
-- Dsv4
-- Ddv4
-- Ddsv4
-- Dav4
-- Dasv4
-- Ev3
-- Esv3
-- Ev4
-- Esv4
-- Edv4
-- Edsv4
-- Eav4
-- Easv4
 
 ---
 
