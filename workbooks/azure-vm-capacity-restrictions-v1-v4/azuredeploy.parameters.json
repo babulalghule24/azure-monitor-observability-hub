@@ -7,9 +7,6 @@
     },
     "workbookType": {
       "value": "workbook"
-    },
-    "workbookSourceId": {
-      "value": "Azure Monitor"
     }
   }
 }
