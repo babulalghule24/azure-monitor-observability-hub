@@ -32,8 +32,39 @@ import sys
 from pathlib import Path
 
 
+def normalize_groups(workbook: dict) -> int:
+    """Normalize workbook group items to the canonical Azure Workbooks form.
+
+    Azure Workbooks only recognizes group content with
+    "version": "NotebookGroup/1.0". A non-canonical version string such as
+    "GroupItem/1.0" causes Azure to silently DROP the group's inline items on
+    load, producing empty tabs. This walks every group item (type 12) at any
+    nesting depth and rewrites the wrapper to the canonical form while keeping
+    all nested items intact. Returns the number of groups changed.
+    """
+    changed = 0
+
+    def walk(items):
+        nonlocal changed
+        for it in items:
+            content = it.get("content", {})
+            if it.get("type") == 12:
+                if content.get("version") != "NotebookGroup/1.0" or "groupType" not in content:
+                    content["version"] = "NotebookGroup/1.0"
+                    content.setdefault("groupType", "editable")
+                    content.pop("style", None)
+                    changed += 1
+            nested = content.get("items")
+            if isinstance(nested, list):
+                walk(nested)
+
+    walk(workbook.get("items", []))
+    return changed
+
+
 def build_template(workbook: dict, display_name: str) -> dict:
     """Return an ARM template dict with the workbook embedded in serializedData."""
+    normalize_groups(workbook)
     serialized = json.dumps(workbook, separators=(",", ":"))
     return {
         "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
@@ -127,6 +158,10 @@ def main() -> int:
             f"WARNING: {workbook_path} has no 'items' — the workbook may be empty.",
             file=sys.stderr,
         )
+
+    normalized = normalize_groups(workbook)
+    if normalized:
+        print(f"Normalized {normalized} group item(s) to 'NotebookGroup/1.0'.")
 
     template = build_template(workbook, args.display_name)
 
