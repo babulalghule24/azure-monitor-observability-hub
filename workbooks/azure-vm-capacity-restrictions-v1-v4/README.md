@@ -1,98 +1,66 @@
-# \# Azure VM Capacity Restrictions (v1-v4)
+# Azure VM Capacity Restrictions (v1-v4)
 
-# 
+## Overview
 
-# \## Overview
+Azure Monitor Workbook to identify Azure VM series impacted by Microsoft's v1-v4 VM capacity restrictions and retirement announcements.
 
-# 
+## Features
 
-# Azure Monitor Workbook to identify Azure VM series impacted by Microsoft's v1-v4 VM capacity restrictions and retirement announcements.
+- Subscription-level analysis
+- Region-level analysis
+- Impacted VM inventory
+- Migration recommendations
+- Capacity risk assessment
+- Export to Excel support
+- Azure Resource Graph powered
 
-# 
+---
 
-# \## Features
+## Deployment Options
 
-# 
+### Option 1: Import Workbook JSON
 
-# \- Subscription-level analysis
+1. Open Azure Portal
+2. Navigate to **Azure Monitor**
+3. Select **Workbooks**
+4. Click **New**
+5. Click **Advanced Editor (</>)**
+6. Remove the default content
+7. Open `workbook.json`
+8. Copy the entire file contents
+9. Paste into Advanced Editor
+10. Click **Apply**
+11. Click **Done Editing**
+12. Save the workbook
 
-# \- Region-level analysis
+---
 
-# \- Impacted VM inventory
+### Option 2: Deploy to Azure
 
-# \- Migration recommendations
+🚧 Coming soon
 
-# \- Capacity risk assessment
+This repository will include:
 
-# \- Excel export support
+- Deploy to Azure button
+- ARM template
+- Parameter file
+- Automated deployment
 
-# \- Azure Resource Graph powered
+---
 
-# 
+## Files
 
-# \---
+| File | Description |
+|------|-------------|
+| workbook.json | Workbook source |
+| azuredeploy.json | ARM deployment template |
+| azuredeploy.parameters.json | Deployment parameters |
+| README.md | Documentation |
 
-# 
+---
 
-# \## Option 1 - Manual Import
+## Author
 
-# 
-
-# 1\. Open Azure Portal
-
-# 2\. Navigate to Azure Monitor
-
-# 3\. Select Workbooks
-
-# 4\. Select New Workbook
-
-# 5\. Select \*\*Advanced Editor\*\*
-
-# 6\. Open `workbook.json`
-
-# 7\. Copy entire contents
-
-# 8\. Paste into Advanced Editor
-
-# 9\. Select \*\*Apply\*\*
-
-# 10\. Select \*\*Done Editing\*\*
-
-# 11\. Save Workbook
-
-# 
-
-# \---
-
-# 
-
-# \## Option 2 - Deploy to Azure
-
-# 
-
-# Available after deployment template is added.
-
-# 
-
-# (Coming soon)
-
-# 
-
-# \---
-
-# 
-
-# \## Author
-
-# 
-
-# Babulal Ghule
-
-# 
-
-# Cloud Solution Architect
-
-# 
-
-# Microsoft SfMC
-
+**Babulal Ghule**  
+Cloud Solution Architect  
+Microsoft SfMC
