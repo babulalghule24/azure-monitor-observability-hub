@@ -1,0 +1,21 @@
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Environment / secrets — never commit tokens or subscription files
+.env
+*.env
+*.local
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+
+# Keep the MCP config, ignore everything else VS Code writes
+.vscode/*
+!.vscode/mcp.json
