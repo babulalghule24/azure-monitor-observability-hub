@@ -1,0 +1,19 @@
+{
+  "_note": "SYNTHETIC fixture data. No customer identity, no real subscription IDs, no personal data.",
+  "customer": "CUSTOMER-A",
+  "workload": "mission-critical retail-transaction platform",
+  "week": "FY27-W12",
+  "subscription": "00000000-aaaa-bbbb-cccc-000000000001",
+  "alerts": [
+    {"rule": "AppGateway-BackendLatency-P95", "severity": "Sev2", "fired": 41, "first": "Tue 09:12 UTC", "last": "Fri 18:40 UTC", "state": "active"},
+    {"rule": "AKS-NodePool-CPU-High", "severity": "Sev3", "fired": 228, "first": "Mon 00:05 UTC", "last": "Sun 23:55 UTC", "state": "active", "note": "fires every 5 min, static threshold 70%"},
+    {"rule": "SQL-DTU-Saturation", "severity": "Sev2", "fired": 6, "first": "Tue 09:20 UTC", "last": "Tue 11:05 UTC", "state": "resolved"},
+    {"rule": "Frontdoor-5xx-RateSpike", "severity": "Sev1", "fired": 3, "first": "Tue 09:14 UTC", "last": "Tue 09:58 UTC", "state": "resolved"},
+    {"rule": "LogIngestion-VolumeSpike", "severity": "Sev3", "fired": 2, "first": "Wed 02:00 UTC", "last": "Thu 02:00 UTC", "state": "active"}
+  ],
+  "coverage_gaps": [
+    "No availability test on the public checkout endpoint",
+    "No alert rule on Key Vault certificate expiry",
+    "Backup job failures are logged but not alerted"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "_note": "SYNTHETIC fixture data. Case IDs are fabricated. No customer identity, no personal data.",
+  "customer": "CUSTOMER-A",
+  "week": "FY27-W12",
+  "open_cases": [
+    {"id": "CASE-1001", "severity": "A", "title": "Intermittent 5xx on public endpoint after traffic increase", "age_days": 4, "state": "with product group", "linked_alert": "Frontdoor-5xx-RateSpike"},
+    {"id": "CASE-1002", "severity": "B", "title": "Managed instance failover took longer than documented RTO", "age_days": 12, "state": "awaiting customer data", "linked_alert": null},
+    {"id": "CASE-1003", "severity": "B", "title": "Log Analytics ingestion cost increase, cause unclear", "age_days": 9, "state": "active", "linked_alert": "LogIngestion-VolumeSpike"},
+    {"id": "CASE-0987", "severity": "C", "title": "Diagnostic settings missing on two data services", "age_days": 31, "state": "stalled", "linked_alert": null}
+  ]
+}

@@ -1,0 +1,12 @@
+# Microsoft Foundry (Azure AI Foundry) + Microsoft Agent Framework, Python
+agent-framework
+agent-framework-orchestrations
+azure-ai-projects
+azure-identity
+python-dotenv
+pydantic
+
+# Exercise 4 (A2A)
+a2a-sdk
+uvicorn
+httpx

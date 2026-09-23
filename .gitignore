@@ -1,0 +1,38 @@
+# Secrets and environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# NEVER commit real engagement data.
+# Only the synthetic fixtures in data/ belong in this repo.
+data/real/
+data/*_export.*
+data/*customer*
+*.alerts.csv
+*.cases.csv
+exports/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local run output
+*.log
+out/
+scratch/

@@ -1,0 +1,11 @@
+{
+  "_note": "SYNTHETIC fixture data modelled on a Consolidated Assessment risk backlog. No customer identity.",
+  "customer": "CUSTOMER-A",
+  "assessment": "Consolidated Assessment (synthetic)",
+  "open_risks": [
+    {"id": "RISK-01", "pillar": "Reliability", "finding": "Single-region data tier; documented RTO not validated by a failover test in the last 12 months", "rating": "High", "owner": "customer", "age_days": 74, "ado_item": 10021},
+    {"id": "RISK-02", "pillar": "Operational Excellence", "finding": "Static-threshold alert rules with no dynamic baselines; high alert noise on compute tier", "rating": "Medium", "owner": "shared", "age_days": 60, "ado_item": 10034},
+    {"id": "RISK-03", "pillar": "Reliability", "finding": "No synthetic availability monitoring on the primary customer-facing endpoint", "rating": "High", "owner": "customer", "age_days": 45, "ado_item": 10040},
+    {"id": "RISK-04", "pillar": "Security", "finding": "Certificate lifecycle not monitored; manual renewal process", "rating": "Medium", "owner": "customer", "age_days": 88, "ado_item": 10012}
+  ]
+}
