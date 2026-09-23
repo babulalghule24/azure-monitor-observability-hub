@@ -1,18 +1,6 @@
-"""STEP 2 - Wrap the Signal agent into an A2A server. It gets an agent card.
+"""STEP 2 - Wrap the Signal agent into an A2A server. It gets an agent card."""
 
-WHAT THIS ADDS: the agent becomes CALLABLE by anyone who speaks A2A - a different
-framework, a different team, a different cloud. Nothing about the agent itself changed.
-
-This is the single most important idea in the protocol: A2A does not change how you build
-an agent. It changes who can reach it.
-
-Run in its own terminal and LEAVE IT RUNNING:
-    python src/step2_signal_a2a_server.py
-
-Then, in another terminal, look at what you just published:
-    curl http://127.0.0.1:9001/.well-known/agent-card.json
-"""
-
+import narrate
 from common import (
     HOST, PORT_SIGNAL, SIGNAL, URL_SIGNAL,
     agent_card, get_client, get_monitor_signals, make, serve,
@@ -31,6 +19,20 @@ card = agent_card(
 
 
 def main():
+    narrate.step_header(
+        2, "Wrap it into an A2A server",
+        adds="An AGENT CARD. The agent becomes callable by anyone who speaks A2A - a "
+             "different framework, a different team, a different cloud. Compare this "
+             "file with step 1: the agent is IDENTICAL. Same instructions, same tool, "
+             "same Foundry project. All we added is a card and a server.",
+        watch_for="This is the single most important idea in the protocol: A2A does "
+                  "not change how you BUILD an agent. It changes who can REACH it.",
+    )
+
+    narrate.event("next", f"fetch the card:  curl {URL_SIGNAL}/.well-known/agent-card.json")
+    narrate.event("then", "in another terminal:  python src/step3_a2a_client.py")
+    narrate.event("leave this running", "the server must stay up for steps 3 and 10")
+
     agent = make(get_client(), "Signal", SIGNAL, [get_monitor_signals])
     serve(agent, card, HOST, PORT_SIGNAL)
 
@@ -39,11 +41,9 @@ if __name__ == "__main__":
     main()
 
 # READ THE AGENT CARD BEFORE YOU MOVE ON
-# It advertises: name, version, the skills you offer, whether you stream, what input and
-# output types you take, and which authentication schemes you accept. This is how a
-# caller decides whether to delegate to you AT ALL. It is a contract, not documentation.
+# It advertises: name, version, the skills you offer, whether you stream, what input
+# and output types you take, and which auth schemes you accept. This is how a caller
+# decides whether to delegate to you AT ALL. It is a CONTRACT, not documentation.
 #
-# CHECK YOUR UNDERSTANDING
-# * Your agent's instructions, your tool, and your Foundry project are NOT in that card.
-#   Why is that the point?
-# * The card lists auth schemes. Nothing in the protocol enforces them. Who does?
+# And notice what is NOT in it: your instructions, your tool, your Foundry project.
+# That omission is the point.

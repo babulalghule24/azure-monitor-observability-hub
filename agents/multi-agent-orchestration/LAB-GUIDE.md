@@ -70,11 +70,28 @@ easily reconstruct alone.
 
 ---
 
-## Step 0 — Setup (do this *before* the session)
+## Step 0 — Setup
+
+### Fast path — 30 seconds, no Azure account
 
 ```bash
-git clone https://github.com/<your-github-handle>/multi-agent-orchestration-l400.git
-cd multi-agent-orchestration-l400
+pip install -r requirements.txt
+LAB_OFFLINE=1 python src/step1_signal_agent.py      # PowerShell: $env:LAB_OFFLINE=1
+```
+
+That's the whole setup. Offline mode answers every agent from a script instead of a
+model — no credentials, no network, no waiting. **Every pattern behaves identically**:
+who speaks, in what order, who decides, where the boundaries are. That's what this lab
+teaches, and it doesn't need a live model.
+
+Run all eleven steps this way if you like, then unset the variable when you want real
+model reasoning. Same code, same files.
+
+### Live path — your own Microsoft Foundry project
+
+```bash
+git clone https://github.com/babulalghule24/azure-monitor-observability-hub.git
+cd azure-monitor-observability-hub/agents/multi-agent-orchestration
 
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
@@ -99,8 +116,43 @@ az login
 **Verify:**
 
 ```bash
-python -c "import agent_framework, agent_framework_orchestrations; print('ready')"
+python src/_preflight.py
 ```
+
+It checks environment, credential, client and a real model call, and explains any
+failure in plain English rather than a traceback. If it ends with ALL CHECKS PASSED,
+every step will run.
+
+**If setup fights you**, it's one of four things — a renamed SDK class, the wrong Entra
+tenant, a missing data-plane role, or a stale token. All four are in
+[docs/SETUP-TROUBLESHOOTING.md](docs/SETUP-TROUBLESHOOTING.md) with fixes. Or use
+`LAB_OFFLINE=1` and come back to it later.
+
+<details>
+<summary>SDK version detail</summary>
+
+```bash
+python src/_doctor.py
+```
+
+It prints exactly what your installed SDK exposes. Class names changed during the
+Microsoft Foundry rebrand, so this is the fastest way to know where you stand.
+
+| Old (pre-rebrand) | Current |
+|---|---|
+| `from agent_framework.azure import AzureAIAgentClient` | `from agent_framework.foundry import FoundryChatClient` |
+| `client.create_agent(...)` | `client.as_agent(...)` |
+| `async_credential=` | `credential=` |
+
+`src/common.py` detects which generation you have and adapts. If you hit
+`ImportError: cannot import name 'AzureAIAgentClient'`, you are on the current SDK but
+missing the Foundry provider — `pip install agent-framework-foundry`, then re-run the
+doctor.
+
+If `DefaultAzureCredential` hangs or picks the wrong identity, force the CLI credential:
+`export LAB_USE_CLI_CREDENTIAL=1` (PowerShell: `$env:LAB_USE_CLI_CREDENTIAL=1`).
+
+</details>
 
 > **If an import or builder name has drifted:** the framework ships fast. Match your
 > installed version against the official Python samples at

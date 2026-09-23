@@ -198,7 +198,33 @@ And the one sentence to carry out of the room:
 
 ---
 
-## 8. Reference material (primary sources only)
+## 8. Running it without any Azure setup
+
+The lab ships an **offline mode**. Set `LAB_OFFLINE=1` and every agent is answered by a
+small scripted stand-in instead of a model. No Azure account, no credentials, no network.
+
+```bash
+pip install -r requirements.txt
+LAB_OFFLINE=1 python src/step1_signal_agent.py     # PowerShell: $env:LAB_OFFLINE=1
+```
+
+**Why this exists, and why it is not a compromise.** What this session teaches is the
+orchestration — who speaks, in what order, who decides the next speaker, and where the
+trust boundaries sit. None of that needs a live model. The same step files, the same
+builders, the same A2A servers and clients run either way; only the thing that generates
+the words changes.
+
+**For the presenter:** put the offline one-liner in the chat before the lab starts. It
+turns a room of thirty people debugging tenants and role assignments into a room of
+thirty people learning orchestration. Setup problems become an upgrade path, not a gate.
+
+**For the learner:** work through all eleven steps offline first. Then, when you want to
+see a real model reason over the data, fill in `.env`, run `python src/_preflight.py`,
+and unset the variable.
+
+---
+
+## 9. Reference material (primary sources only)
 
 - A2A protocol — https://a2a-protocol.org/latest/
 - A2A repo and SDKs — https://github.com/a2aproject/A2A

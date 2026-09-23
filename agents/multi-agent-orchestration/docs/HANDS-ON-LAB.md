@@ -7,6 +7,13 @@ understanding. If you only read one file in this repo, read this one.
 Platform: **Microsoft Foundry (Azure AI Foundry) + Python + Microsoft Agent Framework + A2A**
 Level: **400** · Time: **25 minutes live, ~90 minutes at your own pace**
 
+> **Start in 30 seconds, no Azure account:**
+> `pip install -r requirements.txt` then
+> `LAB_OFFLINE=1 python src/step1_signal_agent.py`
+> (PowerShell: `$env:LAB_OFFLINE=1`)
+> Every pattern behaves identically offline. Set up Foundry when you want real model
+> reasoning — same code, same files.
+
 ---
 
 ## Contents
@@ -132,9 +139,28 @@ That is a design lesson, not repo hygiene:
 
 ## Step 0 — Setup
 
+### The fast path: no Azure account needed
+
 ```bash
-git clone https://github.com/<your-github-handle>/multi-agent-orchestration-l400.git
-cd multi-agent-orchestration-l400
+pip install -r requirements.txt
+
+LAB_OFFLINE=1 python src/step1_signal_agent.py     # PowerShell: $env:LAB_OFFLINE=1
+```
+
+That is the whole setup. Offline mode answers every agent from a script instead of a
+model — no credentials, no network, no waiting. **Every pattern behaves identically**:
+who speaks, in what order, who decides, and where the boundaries are. That is what this
+lab teaches, and it does not need a live model.
+
+Work through all eleven steps this way if you like. Then, when you want to see real
+model reasoning, set up a Foundry project and unset the variable — same code, same
+files.
+
+### The live path: your own Microsoft Foundry project
+
+```bash
+git clone https://github.com/babulalghule24/azure-monitor-observability-hub.git
+cd azure-monitor-observability-hub/agents/multi-agent-orchestration
 
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
@@ -221,9 +247,17 @@ Everything is synthetic. The customer is always "CUSTOMER-A", subscription GUIDs
 fabricated, case IDs are invented, and there are no names, emails or IP addresses
 anywhere. That is a design rule of this architecture, not repo hygiene - see the Redactor.
 
-API note: the framework ships fast. If an import or builder name has drifted, match your
-installed version against the official Python samples:
-https://github.com/microsoft/agent-framework/tree/main/python/samples/03-workflows/orchestrations
+VERSION COMPATIBILITY
+The Agent Framework renamed its Azure client during the Microsoft Foundry rebrand:
+
+    OLD:  from agent_framework.azure   import AzureAIAgentClient   (create_agent, async_credential=)
+    NEW:  from agent_framework.foundry import FoundryChatClient    (as_agent,     credential=)
+
+This file detects which one you have and adapts. If something still fails, run:
+
+    python src/_doctor.py
+
+which prints exactly what your installed version exposes.
 """
 
 import json
@@ -231,11 +265,8 @@ import os
 from pathlib import Path
 from typing import Annotated
 
-from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
 from pydantic import Field
-
-from agent_framework.azure import AzureAIAgentClient
 
 load_dotenv()
 
@@ -246,13 +277,139 @@ DATA = Path(__file__).resolve().parent.parent / "data"
 # 1. The Foundry client - where every agent in this repo actually runs
 # =====================================================================================
 
-def get_client() -> AzureAIAgentClient:
-    """Agents run in a Microsoft Foundry project. Auth is Entra ID - no keys, ever."""
-    return AzureAIAgentClient(
-        project_endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
-        model_deployment_name=os.environ.get("AZURE_AI_MODEL_DEPLOYMENT_NAME", "gpt-4o-mini"),
-        async_credential=DefaultAzureCredential(),
-    )
+# The async credential lives in azure.identity.aio, not azure.identity.
+try:
+    from azure.identity.aio import AzureCliCredential, DefaultAzureCredential
+except ImportError:                                            # very old azure-identity
+    from azure.identity import AzureCliCredential, DefaultAzureCredential  # type: ignore
+
+_FLAVOUR = None       # "foundry" | "azure-ai" | "azure-openai"
+
+try:
+    # Current SDK (post-Foundry-rebrand). This is what you should be on.
+    from agent_framework.foundry import FoundryChatClient as _ChatClient
+    _FLAVOUR = "foundry"
+except ImportError:
+    try:
+        # Older SDK, pre-rebrand.
+        from agent_framework.azure import AzureAIAgentClient as _ChatClient  # type: ignore
+        _FLAVOUR = "azure-ai"
+    except ImportError:
+        try:
+            from agent_framework.azure import AzureAIClient as _ChatClient   # type: ignore
+            _FLAVOUR = "azure-ai"
+        except ImportError as exc:
+            if os.environ.get("LAB_OFFLINE") == "1":
+                _ChatClient, _FLAVOUR = None, "offline"
+            else:
+                    raise ImportError(
+                    "No Microsoft Foundry chat client found.\n"
+                    "Install the Foundry provider:\n"
+                    "    pip install agent-framework agent-framework-foundry agent-framework-orchestrations\n"
+                    "Then run:  python src/_doctor.py\n"
+                    f"Original error: {exc}"
+                ) from exc
+
+
+def get_credential():
+    """Entra ID. No keys, ever.
+
+    TENANT TRAP (this bites on corporate / AVD machines):
+    DefaultAzureCredential tries several sources in order - environment, managed
+    identity, shared token cache, Azure CLI, VS Code. On a machine signed in to more
+    than one directory it often returns a token from the WRONG tenant, and the service
+    replies:
+
+        400 - Token tenant <guid> does not match resource tenant.
+
+    Fix: set AZURE_TENANT_ID in .env to the tenant that OWNS the Foundry resource.
+    Find it with:
+        az account list --query "[?id=='<your-sub-id>'].{sub:name, tenant:tenantId}" -o table
+    Then:
+        az login --tenant <that-tenant-id>
+
+    With AZURE_TENANT_ID set we pin the credential to that tenant and skip the
+    credential sources most likely to hand back a foreign token.
+    """
+    tenant = os.environ.get("AZURE_TENANT_ID", "").strip() or None
+
+    # Explicit opt-in to the CLI credential - simplest and most predictable.
+    if os.environ.get("LAB_USE_CLI_CREDENTIAL") == "1":
+        return AzureCliCredential(tenant_id=tenant) if tenant else AzureCliCredential()
+
+    if tenant:
+        # Pin the tenant and exclude the sources that commonly cache another
+        # directory's token on corporate desktops.
+        try:
+            return DefaultAzureCredential(
+                tenant_id=tenant,
+                exclude_managed_identity_credential=True,
+                exclude_shared_token_cache_credential=True,
+            )
+        except TypeError:
+            return DefaultAzureCredential(tenant_id=tenant)
+
+    return DefaultAzureCredential()
+
+
+def get_client():
+    """Build the Foundry client, whichever SDK generation is installed.
+
+    OFFLINE MODE: set LAB_OFFLINE=1 and this returns a scripted stand-in instead.
+    No Azure, no credentials, no network. Every step file still runs, and the
+    orchestration - who speaks, in what order, who decides - is identical.
+    Use it to learn the patterns in 30 seconds, then unset it for the real thing.
+    """
+    if os.environ.get("LAB_OFFLINE") == "1":
+        from offline import OfflineClient
+        print("  [OFFLINE MODE] scripted answers, no Azure calls. "
+              "Unset LAB_OFFLINE to use your Foundry project.\n")
+        return OfflineClient()
+
+    endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT")
+    if not endpoint:
+        raise RuntimeError(
+            "AZURE_AI_PROJECT_ENDPOINT is not set.\n"
+            "  Either copy .env.example to .env and fill it in,\n"
+            "  or run with no setup at all:   LAB_OFFLINE=1 python src/step1_signal_agent.py\n"
+            "  (PowerShell:  $env:LAB_OFFLINE=1)"
+        )
+    model = os.environ.get("AZURE_AI_MODEL_DEPLOYMENT_NAME", "gpt-4o-mini")
+    cred = get_credential()
+
+    if _FLAVOUR == "foundry":
+        return _ChatClient(project_endpoint=endpoint, model=model, credential=cred)
+
+    try:
+        return _ChatClient(project_endpoint=endpoint, model_deployment_name=model,
+                           async_credential=cred)
+    except TypeError:
+        return _ChatClient(project_endpoint=endpoint, model_deployment_name=model,
+                           credential=cred)
+
+
+def make(client, name: str, instructions: str, tools=None):
+    """Create one agent. `as_agent` on the current SDK, `create_agent` on older ones."""
+    kwargs = {"name": name, "instructions": instructions}
+    if tools:
+        kwargs["tools"] = tools
+
+    factory = getattr(client, "as_agent", None) or getattr(client, "create_agent", None)
+    if factory is None:
+        raise AttributeError(
+            f"{type(client).__name__} has neither as_agent() nor create_agent(). "
+            "Run: python src/_doctor.py"
+        )
+    return factory(**kwargs)
+
+
+def sdk_flavour() -> str:
+    """Which SDK generation we detected - handy when a step file misbehaves."""
+    if os.environ.get("LAB_OFFLINE") == "1":
+        return "OFFLINE (scripted answers, no Azure)"
+    tenant = os.environ.get("AZURE_TENANT_ID", "").strip()
+    suffix = f", tenant={tenant}" if tenant else ", tenant=(not pinned)"
+    return f"{_FLAVOUR} ({_ChatClient.__module__}.{_ChatClient.__name__}{suffix})"
 
 
 # =====================================================================================
@@ -357,11 +514,6 @@ TCL_QUEUE = (
 )
 
 
-def make(client, name: str, instructions: str, tools=None):
-    """One-liner so every step file reads the same way."""
-    return client.create_agent(name=name, instructions=instructions, tools=tools or [])
-
-
 def build_desk(client):
     """All in-process agents, for the steps that do not need A2A."""
     return {
@@ -399,42 +551,420 @@ def agent_card(name: str, description: str, skill_id: str, skill_name: str,
     )
 
 
+class _FrameworkAgentExecutor:
+    """Bridge: expose a Microsoft Agent Framework agent as an A2A AgentExecutor.
+
+    The A2A server does not know about Agent Framework. It speaks its own interface -
+    execute(context, event_queue) - so this tiny adapter is what makes any agent you
+    build A2A-callable. This IS the 'wrap it into an A2A server' step, in 20 lines.
+    """
+
+    def __init__(self, agent):
+        self.agent = agent
+
+    async def execute(self, context, event_queue) -> None:
+        # Pull the caller's text out of the request context.
+        try:
+            query = context.get_user_input()
+        except Exception:
+            query = str(getattr(context, "message", ""))
+
+        result = await self.agent.run(query)
+        text = str(result)
+
+        from a2a.utils import new_agent_text_message
+        event = new_agent_text_message(text)
+
+        # enqueue_event is async in some 0.3.x builds, sync in others.
+        maybe = event_queue.enqueue_event(event)
+        if hasattr(maybe, "__await__"):
+            await maybe
+
+    async def cancel(self, context, event_queue) -> None:
+        raise NotImplementedError("cancel is not supported in this lab agent")
+
+
 def serve(agent, card, host: str, port: int):
-    """Wrap any agent in an A2A server and run it. This is the whole 'become callable' step."""
+    """Wrap any agent in an A2A server and run it.
+
+    Three pieces, and they map exactly onto the protocol:
+      * AgentExecutor  - runs your agent when a task arrives
+      * TaskStore      - remembers tasks through their lifecycle
+      * AgentCard      - what callers fetch to decide whether to trust you
+    """
     import uvicorn
     from a2a.server.apps import A2AStarletteApplication
+    from a2a.server.request_handlers import DefaultRequestHandler
+    from a2a.server.tasks import InMemoryTaskStore
 
-    app = A2AStarletteApplication(agent_card=card, agent=agent)
+    # Prefer the official Agent Framework bridge if it is installed AND compatible;
+    # otherwise use our own 20-line executor above.
+    executor = None
+    try:
+        from agent_framework_a2a import AgentFrameworkExecutor  # type: ignore
+        executor = AgentFrameworkExecutor(agent)
+    except Exception:
+        executor = _FrameworkAgentExecutor(agent)
+
+    handler = DefaultRequestHandler(
+        agent_executor=executor,
+        task_store=InMemoryTaskStore(),
+    )
+    app = A2AStarletteApplication(agent_card=card, http_handler=handler)
+
     print(f"\nServing '{card.name}' at http://{host}:{port}")
-    print(f"Agent card: http://{host}:{port}/.well-known/agent-card.json\n")
+    print(f"Agent card: http://{host}:{port}/.well-known/agent-card.json")
+    print(f"Executor:   {type(executor).__name__}\n")
+
     uvicorn.run(app.build(), host=host, port=port)
 
 
 async def ask_a2a(base_url: str, question: str, message_id: str = "sfmc-001", verbose: bool = True):
     """Discover -> delegate -> observe. The three moves of every A2A call."""
     import httpx
-    from a2a.client import A2ACardResolver, ClientFactory
-    from a2a.types import Message, Part, Role, TextPart
+    from a2a.client import A2ACardResolver
 
-    async with httpx.AsyncClient(timeout=90) as http:
-        card = await A2ACardResolver(http, base_url).get_agent_card()      # 1. DISCOVER
+    async with httpx.AsyncClient(timeout=120) as http:
+        # ---- 1. DISCOVER -------------------------------------------------------------
+        card = await A2ACardResolver(http, base_url).get_agent_card()
         if verbose:
             print(f"Discovered : {card.name} v{card.version}")
             print(f"Skills     : {[s.id for s in card.skills]}")
             print(f"Streaming  : {card.capabilities.streaming}")
 
-        client = ClientFactory(httpx_client=http).create(card)             # 2. DELEGATE
-        message = Message(
-            role=Role.user, message_id=message_id,
-            parts=[Part(root=TextPart(text=question))],
-        )
+        # ---- 2. DELEGATE -------------------------------------------------------------
+        from a2a.types import Message, Part, Role, TextPart
 
+        try:
+            part = Part(root=TextPart(text=question))       # 0.3.x
+        except Exception:
+            part = Part(text=question)                      # 1.x shape, just in case
+
+        message = Message(role=Role.user, message_id=message_id, parts=[part])
+
+        # ClientFactory in newer 0.3.x; A2AClient in older builds.
+        client = None
+        try:
+            from a2a.client import ClientFactory
+            try:
+                from a2a.client import ClientConfig
+                client = ClientFactory(ClientConfig(httpx_client=http)).create(card)
+            except Exception:
+                client = ClientFactory(httpx_client=http).create(card)
+        except Exception:
+            from a2a.client import A2AClient
+            client = A2AClient(httpx_client=http, agent_card=card)
+
+        # ---- 3. OBSERVE --------------------------------------------------------------
         out = []
-        async for event in client.send_message(message):                   # 3. OBSERVE
+        try:
+            async for event in client.send_message(message):
+                if verbose:
+                    print(event)
+                out.append(str(event))
+        except TypeError:
+            # Older A2AClient wants a params object and returns a single response.
+            from a2a.types import MessageSendParams, SendMessageRequest
+            req = SendMessageRequest(
+                id=message_id,
+                params=MessageSendParams(message=message),
+            )
+            response = await client.send_message(req)
             if verbose:
-                print(event)
-            out.append(str(event))
+                print(response)
+            out.append(str(response))
+
         return "\n".join(out)
+
+
+
+# =====================================================================================
+# 4b. Orchestration builder helpers
+#
+# The builders have changed shape across releases: some take `participants` as a
+# constructor keyword, others expose a fluent .participants([...]) method. These
+# helpers try both so the step files stay readable and you are not debugging a
+# builder signature during a lab.
+#
+# If one of these still fails, print the real signature:
+#     python -c "import inspect; from agent_framework.orchestrations import SequentialBuilder; print(inspect.signature(SequentialBuilder.__init__))"
+# =====================================================================================
+
+def _build(builder_cls, agents, **extra):
+    """Construct a workflow from a builder class, whichever API shape it has."""
+    errors = []
+
+    # Shape A: participants as a constructor keyword
+    try:
+        return builder_cls(participants=agents, **extra).build()
+    except Exception as exc:
+        errors.append(f"  participants= kwarg: {type(exc).__name__}: {exc}")
+
+    # Shape B: fluent .participants([...])
+    try:
+        b = builder_cls(**extra)
+        if hasattr(b, "participants"):
+            return b.participants(agents).build()
+    except Exception as exc:
+        errors.append(f"  fluent .participants(): {type(exc).__name__}: {exc}")
+
+    # Shape C: positional
+    try:
+        return builder_cls(agents, **extra).build()
+    except Exception as exc:
+        errors.append(f"  positional: {type(exc).__name__}: {exc}")
+
+    import inspect
+    raise RuntimeError(
+        f"Could not construct {builder_cls.__name__}. Attempts:\n"
+        + "\n".join(errors)
+        + f"\n\n  Real signature: {inspect.signature(builder_cls.__init__)}"
+    )
+
+
+def build_sequential(agents):
+    """Pipeline: each agent consumes what the previous one produced."""
+    from agent_framework.orchestrations import SequentialBuilder
+    return _build(SequentialBuilder, agents)
+
+
+def build_concurrent(agents):
+    """Fan-out / fan-in: every agent answers the same prompt at once."""
+    from agent_framework.orchestrations import ConcurrentBuilder
+    return _build(ConcurrentBuilder, agents)
+
+
+def build_group_chat(agents, max_iterations: int = 6):
+    """Star topology. An orchestrator decides who speaks next. ALWAYS capped.
+
+    This builder has NO default orchestrator - you must pass one of
+    orchestrator_agent, orchestrator, or selection_func. That is deliberate:
+    speaker selection IS the design of a group chat, so the framework makes you
+    state it rather than guessing for you.
+
+    We pass a selection_func doing round-robin by participant NAME. The function must
+    return a name that exists in the participant list - an index or None is rejected.
+
+    max_rounds is the hard cap, and it is a BUDGET, not a tuning knob. An uncapped
+    group chat is an uncapped bill. Set it to 2 and watch the loop stop mid-refinement.
+
+    STRETCH GOAL (the constructor supports it): round-robin keeps talking even after
+    the Redactor says APPROVED. Pass a `termination_condition` to stop as soon as the
+    work is approved - that typically halves the token cost of the loop.
+    """
+    from agent_framework.orchestrations import GroupChatBuilder
+
+    names = [getattr(a, "name", None) or f"agent{i}" for i, a in enumerate(agents)]
+
+    def select_next(*args, **kwargs):
+        """Round-robin by name. Must return a participant NAME."""
+        messages = None
+        for candidate in list(args) + list(kwargs.values()):
+            if isinstance(candidate, (list, tuple)) and candidate:
+                messages = candidate
+                break
+            for attr in ("messages", "conversation", "history"):
+                got = getattr(candidate, attr, None)
+                if isinstance(got, (list, tuple)):
+                    messages = got
+                    break
+            if messages:
+                break
+        messages = messages or []
+        return names[len(messages) % len(names)]
+
+    return GroupChatBuilder(
+        participants=agents,
+        selection_func=select_next,
+        max_rounds=max_iterations,
+    ).build()
+
+
+def build_handoff(coordinator, specialists, human_target=None):
+    """Decentralised routing. The current agent picks the next, via a tool call."""
+    from agent_framework.orchestrations import HandoffBuilder
+
+    targets = list(specialists) + ([human_target] if human_target else [])
+    everyone = [coordinator] + targets
+
+    try:
+        b = HandoffBuilder(participants=everyone)
+    except TypeError:
+        b = HandoffBuilder(everyone)
+
+    if hasattr(b, "set_coordinator"):
+        b = b.set_coordinator(coordinator)
+
+    if hasattr(b, "add_handoff"):
+        b = b.add_handoff(coordinator, targets)
+        for s in specialists:
+            if human_target:
+                b = b.add_handoff(s, [coordinator, human_target])
+            else:
+                b = b.add_handoff(s, [coordinator])
+    return b.build()
+
+
+
+def _text_of(obj) -> str:
+    """Dig readable text out of whatever the framework handed us.
+
+    Workflow events carry Message / AgentResponse objects whose repr is a memory
+    address. For a lab you need to SEE what each agent said, so this walks the
+    common shapes and pulls the text out.
+    """
+    if obj is None:
+        return ""
+    if isinstance(obj, str):
+        return obj
+
+    # Direct text attribute
+    for attr in ("text", "content"):
+        val = getattr(obj, attr, None)
+        if isinstance(val, str) and val.strip():
+            return val
+
+    # A response wrapping messages
+    for attr in ("messages", "parts", "contents"):
+        seq = getattr(obj, attr, None)
+        if isinstance(seq, (list, tuple)):
+            chunks = [_text_of(x) for x in seq]
+            joined = "\n".join(c for c in chunks if c)
+            if joined.strip():
+                return joined
+
+    # A response wrapping a response
+    for attr in ("agent_response", "response", "value", "result"):
+        inner = getattr(obj, attr, None)
+        if inner is not None and inner is not obj:
+            got = _text_of(inner)
+            if got.strip():
+                return got
+
+    if isinstance(obj, (list, tuple)):
+        chunks = [_text_of(x) for x in obj]
+        joined = "\n".join(c for c in chunks if c)
+        if joined.strip():
+            return joined
+
+    return ""
+
+
+def _print_event(event, seen: set) -> str:
+    """Print one workflow event in a form a human can read. Returns the text."""
+    etype = getattr(event, "type", None) or getattr(event, "kind", None) or ""
+    who = getattr(event, "executor_id", None) or getattr(event, "source_id", "") or ""
+    data = getattr(event, "data", None)
+
+    # Only the events that carry agent output are worth showing in a lab.
+    if etype not in ("executor_completed", "output", "agent_response", "message"):
+        return ""
+
+    text = _text_of(data).strip()
+    if not text:
+        return ""
+
+    key = (who, text[:200])
+    if key in seen:          # executor_completed and output often duplicate
+        return ""
+    seen.add(key)
+
+    label = who or etype
+    print(f"\n{'=' * 70}\n  {label}\n{'=' * 70}\n{text}")
+    return text
+
+
+async def run_workflow(workflow, message, verbose: bool = True) -> str:
+    """Run a workflow and narrate it - one labelled block per agent turn.
+
+    The framework emits raw event objects. For a lab that is useless, so this pulls
+    out who spoke and what they said, and prints it as a readable transcript.
+    """
+    STREAMING = ("run_stream", "run_streaming", "run_stream_async",
+                 "stream", "invoke_stream", "stream_async")
+    SINGLE = ("run", "run_async", "invoke", "invoke_async", "execute")
+
+    try:
+        from narrate import turn as _turn, event as _event
+    except ImportError:                       # narrate.py not on the path
+        def _turn(speaker, text, note=""):
+            print(f"\\n--- {speaker} ---\\n{text}")
+
+        def _event(label, detail=""):
+            print(f"  >> {label}{': ' + detail if detail else ''}")
+
+    collected: list[str] = []
+    seen: set = set()
+    order: list[str] = []
+
+    def _handle(ev) -> None:
+        etype = getattr(ev, "type", None) or getattr(ev, "kind", None) or ""
+        who = getattr(ev, "executor_id", None) or getattr(ev, "source_id", "") or ""
+        data = getattr(ev, "data", None)
+
+        # Call out the protocol / control-flow moments, quietly.
+        if etype == "executor_invoked" and who and who not in order:
+            order.append(who)
+            if who.lower() not in ("input-conversation", "input"):
+                _event("handing the turn to", who)
+
+        if etype not in ("executor_completed", "output", "agent_response", "message"):
+            return
+
+        text = _text_of(data).strip()
+        if not text or who.lower() in ("input-conversation", "input"):
+            return
+
+        key = (who, text[:200])
+        if key in seen:                       # completed + output often duplicate
+            return
+        seen.add(key)
+
+        note = ""
+        upper = text.upper()
+        if upper.startswith("APPROVED") or upper == "APPROVED":
+            note = "approved - nothing leaves the desk until this"
+        elif "handoff_to" in text:
+            note = "routing decision made by the model"
+
+        if verbose:
+            _turn(who or etype, text, note)
+        collected.append(f"[{who}] {text}")
+
+    for name in STREAMING:
+        fn = getattr(workflow, name, None)
+        if fn is None:
+            continue
+        try:
+            async for ev in fn(message):
+                _handle(ev)
+            if collected:
+                return "\\n\\n".join(collected)
+        except TypeError:
+            continue
+        except AttributeError:
+            continue
+
+    for name in SINGLE:
+        fn = getattr(workflow, name, None)
+        if fn is None:
+            continue
+        try:
+            result = fn(message)
+            if hasattr(result, "__await__"):
+                result = await result
+            text = _text_of(result) or str(result)
+            if verbose:
+                _turn("result", text)
+            return text
+        except TypeError:
+            continue
+
+    available = ", ".join(n for n in dir(workflow) if not n.startswith("_"))
+    raise RuntimeError(
+        "Could not find a run method on this Workflow.\\n"
+        f"Available members: {available}"
+    )
 
 
 # Ports, so the three A2A servers can run side by side on one laptop.
@@ -485,20 +1015,12 @@ This is also the smallest thing that can fail. If this does not run, nothing lat
 ### The code — `src/step1_signal_agent.py`
 
 ```python
-"""STEP 1 - A plain agent on Foundry. No protocol, no orchestration, nothing clever.
-
-WHAT THIS ADDS: the first box on our architecture diagram - one working specialist.
-WHAT IT DOES NOT HAVE YET: any way for another agent to call it.
-
-This is deliberately the smallest thing that works. If you cannot get this to run, none
-of the later steps will, so fix it here.
-
-Run:  python src/step1_signal_agent.py
-"""
+"""STEP 1 - A plain agent on Foundry. No protocol. No orchestration."""
 
 import asyncio
 
-from common import SIGNAL, get_client, get_monitor_signals, make
+import narrate
+from common import SIGNAL, get_client, get_monitor_signals, make, sdk_flavour
 
 QUESTION = (
     "For FY27-W12 on CUSTOMER-A: which alerts are real signal and which are noise, "
@@ -507,29 +1029,44 @@ QUESTION = (
 
 
 async def main():
-    client = get_client()
+    narrate.step_header(
+        1, "One agent, one tool",
+        adds="The first box on our architecture diagram - a single working specialist. "
+             "No protocol, no orchestration, nothing clever. This is deliberately the "
+             "smallest thing that works: if this does not run, nothing later will.",
+        watch_for="The agent reads a week of synthetic Azure Monitor data and separates "
+                  "SIGNAL from NOISE. Watch whether it JUSTIFIES each call - an agent "
+                  "that cannot say why is not usable in mission-critical support.",
+    )
 
-    # One agent. One tool. That is the entire Foundry surface area you need today.
-    signal = make(client, "Signal", SIGNAL, [get_monitor_signals])
+    narrate.event("SDK in use", sdk_flavour())
+    narrate.event("the week", "CUSTOMER-A, FY27-W12 - 5xx errors since Tuesday, "
+                              "latency up, no deployment")
 
+    signal = make(get_client(), "Signal", SIGNAL, [get_monitor_signals])
     result = await signal.run(QUESTION)
-    print(result)
+
+    narrate.turn("Signal", str(result), "one agent, one tool, no orchestration")
+
+    narrate.takeaway(
+        "You authenticated to a Foundry project with Entra ID. There is no API key "
+        "anywhere in this repo.",
+        "The model chose to call get_monitor_signals because its DESCRIPTION said it "
+        "could. Tool selection is a writing problem before it is a coding problem.",
+        "Nothing here is multi-agent yet - and for this one question, it did not need "
+        "to be. That is the discipline: add an agent only when you can name the "
+        "expertise, the trust boundary, or the parallelism it buys you.",
+    )
+
+    narrate.ask(
+        "AKS-NodePool-CPU-High fired 228 times. Did the agent call it noise, and did "
+        "it say WHY?",
+        "Would a second agent have made this particular answer better? Be honest.",
+    )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# WHAT JUST HAPPENED
-# 1. You authenticated to a Foundry project with Entra ID - no key anywhere.
-# 2. The model called your get_monitor_signals tool because its description said it could.
-# 3. It read synthetic alert data and separated signal from noise.
-#
-# CHECK YOUR UNDERSTANDING
-# * The agent found AKS-NodePool-CPU-High firing 228 times. Did it call that signal or
-#   noise, and did it say WHY? An agent that cannot justify a conclusion is not usable
-#   in mission-critical support.
-# * Nothing here is multi-agent yet. Ask yourself honestly: for this one question, would
-#   a second agent have made the answer better?
 ```
 
 ### Run it
@@ -572,21 +1109,9 @@ delegate to you at all.
 ### The code — `src/step2_signal_a2a_server.py`
 
 ```python
-"""STEP 2 - Wrap the Signal agent into an A2A server. It gets an agent card.
+"""STEP 2 - Wrap the Signal agent into an A2A server. It gets an agent card."""
 
-WHAT THIS ADDS: the agent becomes CALLABLE by anyone who speaks A2A - a different
-framework, a different team, a different cloud. Nothing about the agent itself changed.
-
-This is the single most important idea in the protocol: A2A does not change how you build
-an agent. It changes who can reach it.
-
-Run in its own terminal and LEAVE IT RUNNING:
-    python src/step2_signal_a2a_server.py
-
-Then, in another terminal, look at what you just published:
-    curl http://127.0.0.1:9001/.well-known/agent-card.json
-"""
-
+import narrate
 from common import (
     HOST, PORT_SIGNAL, SIGNAL, URL_SIGNAL,
     agent_card, get_client, get_monitor_signals, make, serve,
@@ -605,6 +1130,20 @@ card = agent_card(
 
 
 def main():
+    narrate.step_header(
+        2, "Wrap it into an A2A server",
+        adds="An AGENT CARD. The agent becomes callable by anyone who speaks A2A - a "
+             "different framework, a different team, a different cloud. Compare this "
+             "file with step 1: the agent is IDENTICAL. Same instructions, same tool, "
+             "same Foundry project. All we added is a card and a server.",
+        watch_for="This is the single most important idea in the protocol: A2A does "
+                  "not change how you BUILD an agent. It changes who can REACH it.",
+    )
+
+    narrate.event("next", f"fetch the card:  curl {URL_SIGNAL}/.well-known/agent-card.json")
+    narrate.event("then", "in another terminal:  python src/step3_a2a_client.py")
+    narrate.event("leave this running", "the server must stay up for steps 3 and 10")
+
     agent = make(get_client(), "Signal", SIGNAL, [get_monitor_signals])
     serve(agent, card, HOST, PORT_SIGNAL)
 
@@ -613,14 +1152,12 @@ if __name__ == "__main__":
     main()
 
 # READ THE AGENT CARD BEFORE YOU MOVE ON
-# It advertises: name, version, the skills you offer, whether you stream, what input and
-# output types you take, and which authentication schemes you accept. This is how a
-# caller decides whether to delegate to you AT ALL. It is a contract, not documentation.
+# It advertises: name, version, the skills you offer, whether you stream, what input
+# and output types you take, and which auth schemes you accept. This is how a caller
+# decides whether to delegate to you AT ALL. It is a CONTRACT, not documentation.
 #
-# CHECK YOUR UNDERSTANDING
-# * Your agent's instructions, your tool, and your Foundry project are NOT in that card.
-#   Why is that the point?
-# * The card lists auth schemes. Nothing in the protocol enforces them. Who does?
+# And notice what is NOT in it: your instructions, your tool, your Foundry project.
+# That omission is the point.
 ```
 
 ### Run it
@@ -679,16 +1216,11 @@ for push notification on tasks that run for hours.
 ### The code — `src/step3_a2a_client.py`
 
 ```python
-"""STEP 3 - Call the Signal agent from an A2A client. Discover, delegate, observe.
-
-WHAT THIS ADDS: the first arrow on the diagram. You are now a client of a remote agent.
-
-Make sure step 2 is running first, then:
-    python src/step3_a2a_client.py
-"""
+"""STEP 3 - Call the Signal agent over A2A. Discover, delegate, observe."""
 
 import asyncio
 
+import narrate
 from common import URL_SIGNAL, ask_a2a
 
 QUESTION = (
@@ -698,28 +1230,46 @@ QUESTION = (
 
 
 async def main():
-    await ask_a2a(URL_SIGNAL, QUESTION, message_id="step-3-001")
+    narrate.step_header(
+        3, "Call it from an A2A client",
+        adds="The first arrow on the diagram. You are now a CLIENT of a remote agent - "
+             "one you did not build, running in a process you do not control.",
+        watch_for="Three moves, and they are the entire protocol. DISCOVER the agent "
+                  "card and decide whether to trust it. DELEGATE by sending a message. "
+                  "OBSERVE what comes back. Also notice what you CANNOT see.",
+    )
+
+    narrate.event("step 1", "DISCOVER - fetch the agent card")
+    text = await ask_a2a(URL_SIGNAL, QUESTION, message_id="step-3-001", verbose=False)
+
+    narrate.event("step 2", "DELEGATE - send a Message; the remote agent does the work")
+    narrate.event("step 3", "OBSERVE - read what comes back")
+
+    narrate.turn("Signal (remote, over A2A)", text,
+                 "same agent as step 1 - but you reached it over HTTP")
+
+    narrate.takeaway(
+        "You never saw the remote agent's instructions, its tool, its model deployment "
+        "or its data. That OPACITY is not a limitation - it is the feature that makes "
+        "A2A safe across an organisational boundary.",
+        "For short synchronous work the agent replies with a Message. For long-running "
+        "work it opens a TASK with a lifecycle - submitted, working, input_required, "
+        "completed / failed / canceled - and streams status or calls you back on a "
+        "webhook. Same protocol, two shapes.",
+        "Note input_required in that lifecycle. The protocol has a built-in notion of "
+        "'I need to ask a human something'. That is not an afterthought.",
+    )
+
+    narrate.ask(
+        "Kill the server and re-run this. What comes back, and did your code handle it? "
+        "failed and canceled are states you must code for, not just completed.",
+        "What would you have to strip from a real engagement's context before sending "
+        "it across this boundary?",
+    )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# THE THREE MOVES, AND YOU WILL SEE ALL THREE IN THE OUTPUT
-# 1. DISCOVER - fetch the agent card. Decide whether to trust it.
-# 2. DELEGATE - send a Message. The remote agent opens a Task.
-# 3. OBSERVE  - the Task moves through its lifecycle:
-#               submitted -> working -> input_required -> completed / failed / canceled
-#               and finally emits Artifacts.
-#
-# NOTICE WHAT YOU CANNOT SEE
-# You never saw the remote agent's instructions, its tool, its model deployment or its
-# data. That opacity is not a limitation - it is the feature that makes A2A safe across
-# an organisational boundary.
-#
-# CHECK YOUR UNDERSTANDING
-# * Find the task state transitions in the output. Which state would a long-running
-#   research task sit in for minutes, and how would you get told when it finished?
-# * Kill the server and re-run this. What state do you get, and did your code handle it?
 ```
 
 ### Run it
@@ -759,21 +1309,9 @@ where a function call will do.
 ### The code — `src/step4_case_a2a_server.py`
 
 ```python
-"""STEP 4 - A second A2A server: the CaseReview agent.
+"""STEP 4 - A second A2A server: the CaseReview agent."""
 
-WHAT THIS ADDS: the second bottom box on the diagram. Two independent specialists, each
-reachable over the protocol, neither knowing the other exists.
-
-This is where a multi-agent SYSTEM starts, and notice how little ceremony it took: a new
-agent, a new card, a new port.
-
-Run in its own terminal and LEAVE IT RUNNING:
-    python src/step4_case_a2a_server.py
-
-Sanity check from anywhere:
-    curl http://127.0.0.1:9002/.well-known/agent-card.json
-"""
-
+import narrate
 from common import (
     CASE_REVIEW, HOST, PORT_CASES, URL_CASES,
     agent_card, get_client, get_open_cases, make, serve,
@@ -792,6 +1330,19 @@ card = agent_card(
 
 
 def main():
+    narrate.step_header(
+        4, "A second A2A server",
+        adds="The second bottom box on the diagram. Two independent specialists, each "
+             "reachable over the protocol, NEITHER knowing the other exists. This is "
+             "where a multi-agent SYSTEM starts.",
+        watch_for="How little ceremony that took: a new agent, a new card, a new port. "
+                  "That cheapness is a trap as much as a feature - it makes it easy to "
+                  "add agents you did not need.",
+    )
+
+    narrate.event("rule of thumb", "agents-as-tools inside a crew, A2A between crews")
+    narrate.event("leave this running", "step 10 needs all three servers up")
+
     agent = make(get_client(), "CaseReview", CASE_REVIEW, [get_open_cases])
     serve(agent, card, HOST, PORT_CASES)
 
@@ -800,9 +1351,8 @@ if __name__ == "__main__":
     main()
 
 # CHECK YOUR UNDERSTANDING
-# * Both servers now run on your laptop. In production, who owns each one - the same team?
-#   Different teams? If the same team owns both, should they have been A2A at all?
-# * Rule of thumb to hold onto: agents-as-tools inside a crew, A2A between crews.
+# * In production, who owns each server? If the SAME team owns both, should they have
+#   been A2A at all? Do not add an HTTP hop where a function call will do.
 ```
 
 ### Run it
@@ -848,24 +1398,12 @@ streaming events and tool approval for free.**
 ### The code — `src/step5_sequential_report.py`
 
 ```python
-"""STEP 5 - Sequential: findings -> Reporter -> Redactor.
-
-WHAT THIS ADDS: the first ORCHESTRATION pattern, and the in-process side box on the
-diagram. Note these two agents are NOT A2A - they are in the same process, so putting
-HTTP between them would cost latency and buy nothing.
-
-Sequential is a pipeline: fixed order, you wrote the order, each agent consumes what the
-previous one produced. Here, order is the whole point. The Reporter cannot write before
-the findings exist, and nothing leaves the desk before the Redactor has seen it.
-
-Run:  python src/step5_sequential_report.py
-"""
+"""STEP 5 - Sequential: findings -> Reporter -> Redactor."""
 
 import asyncio
 
-from agent_framework.orchestrations import SequentialBuilder
-
-from common import build_desk, get_client
+import narrate
+from common import build_desk, build_sequential, get_client, run_workflow
 
 FINDINGS = (
     "FINDINGS for CUSTOMER-A, FY27-W12 (synthetic):\n"
@@ -882,29 +1420,45 @@ FINDINGS = (
 
 
 async def main():
-    desk = build_desk(get_client())
-
-    workflow = (
-        SequentialBuilder()
-        .participants([desk["reporter"], desk["redactor"]])
-        .build()
+    narrate.step_header(
+        5, "Sequential — write it, then gate it",
+        adds="The first orchestration pattern, and the confidentiality gate. These two "
+             "agents are IN-PROCESS, not A2A — same process, no HTTP hop, because they "
+             "do not need one. Order is the whole point: the Reporter cannot write "
+             "before the findings exist, and nothing leaves the desk before the "
+             "Redactor has seen it.",
+        watch_for="Two turns, in a fixed order you wrote. The Reporter drafts the "
+                  "customer-ready summary; the Redactor either approves it or returns "
+                  "numbered corrections. The Redactor sees the ORIGINAL findings too, "
+                  "which is how it can catch a number that was never in them.",
     )
 
-    async for event in workflow.run_stream(FINDINGS):
-        print(event)
+    desk = build_desk(get_client())
+    workflow = build_sequential([desk["reporter"], desk["redactor"]])
+    await run_workflow(workflow, FINDINGS)
+
+    narrate.takeaway(
+        "Sequential is a pipeline: fixed order, each agent consumes what the previous "
+        "one produced. If you were about to write a for-loop over your agents, this is "
+        "that loop — plus streaming events and tool approval for free.",
+        "By default every agent sees the WHOLE conversation, not just the last message. "
+        "Correct here, because the Redactor must check the draft against the findings. "
+        "For a pure transform stage, chain_only_agent_responses=True costs fewer tokens.",
+        "The Redactor is a first-class agent with a veto, not a filter bolted on at the "
+        "end. That placement is the architecture, not a detail.",
+    )
+
+    narrate.ask(
+        "Add 'contact is Jane Doe, jane@example.com' to FINDINGS and re-run. Does the "
+        "Redactor refuse? If not, your gate is decorative — and a prompt alone is not "
+        "a control.",
+        "Which stage here would you restrict with chain_only_agent_responses=True, and "
+        "what would it save you?",
+    )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# CHECK YOUR UNDERSTANDING
-# * By default each agent sees the WHOLE conversation, not just the last message. Good
-#   here - the Redactor must check the draft against the original findings. For a pure
-#   transform stage, SequentialBuilder offers chain_only_agent_responses=True. When would
-#   you want that, and what does it save?
-# * Try breaking the gate: add "contact is Jane Doe, jane@example.com" to FINDINGS and
-#   re-run. The Redactor MUST refuse. If it does not, your gate is decorative - and you
-#   have just learned that a prompt alone is not a control.
 ```
 
 ### Run it
@@ -944,47 +1498,50 @@ you make, not a default you inherit.
 ### The code — `src/step6_concurrent_gather.py`
 
 ```python
-"""STEP 6 - Concurrent: three specialists read the same week at once.
-
-WHAT THIS ADDS: fan-out / fan-in. Signal, Resilience and CaseReview each read a different
-source. None needs another's output, so running them one at a time is wasted latency.
-
-This is the honest case for "parallel". Most people reach for concurrent when they should
-not - so learn the test: if agent B should read agent A's answer, this is the wrong pattern.
-
-Run:  python src/step6_concurrent_gather.py
-"""
+"""STEP 6 - Concurrent: three specialists read the same week at once."""
 
 import asyncio
 
-from agent_framework.orchestrations import ConcurrentBuilder
-
-from common import THIS_WEEK, build_desk, get_client
+import narrate
+from common import THIS_WEEK, build_concurrent, build_desk, get_client, run_workflow
 
 
 async def main():
-    desk = build_desk(get_client())
-
-    workflow = (
-        ConcurrentBuilder()
-        .participants([desk["signal"], desk["resilience"], desk["cases"]])
-        .build()
+    narrate.step_header(
+        6, "Concurrent — three specialists, one week, at once",
+        adds="Fan-out / fan-in, and the test for when 'parallel' is honest. Signal "
+             "reads the alerts, Resilience reads the assessment risks, CaseReview reads "
+             "the open cases. Three different sources, and none of them needs another's "
+             "output - so running them one at a time is pure wasted latency.",
+        watch_for="Three independent answers, with NO ordering and NO shared "
+                  "refinement. Nobody merges them. That is the design decision this "
+                  "pattern hands back to you.",
     )
 
-    async for event in workflow.run_stream(THIS_WEEK):
-        print(event)
+    desk = build_desk(get_client())
+    workflow = build_concurrent([desk["signal"], desk["resilience"], desk["cases"]])
+    await run_workflow(workflow, THIS_WEEK)
+
+    narrate.takeaway(
+        "THE TEST, in one sentence: if agent B should read agent A's answer, this is "
+        "the wrong pattern. Concurrent is the one people reach for and then regret, "
+        "because 'parallel' sounds efficient.",
+        "The default aggregator returns one message per participant. Somebody still has "
+        "to merge them - a custom aggregator, or a summarising agent. That is a "
+        "decision you make, not a default you inherit.",
+        "Here it IS honest: three sources, three skills, no dependency between them.",
+    )
+
+    narrate.ask(
+        "Signal and Resilience may disagree about the cause. Who reconciles them, and "
+        "when do you decide that - now, or in production?",
+        "Add the Reporter as a fourth concurrent participant and watch it write a "
+        "service review based on nothing. That failure IS the lesson.",
+    )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# CHECK YOUR UNDERSTANDING
-# * Nobody merged the three answers. The default aggregator returns one message per
-#   participant. Who should merge - a custom aggregator, or the Reporter in step 5?
-# * What do you do when Signal and Resilience contradict each other? Decide that now,
-#   not in production.
-# * Stretch: add the Reporter as a fourth concurrent participant and watch it write a
-#   service review based on nothing. That failure IS the lesson.
 ```
 
 ### Run it
@@ -1026,23 +1583,9 @@ refuses inbound.
 ### The code — `src/step7_coe_a2a_server.py`
 
 ```python
-"""STEP 7 - The third A2A server: another team's agent, in another Foundry project.
+"""STEP 7 - The third A2A server: another team's agent, another Foundry project."""
 
-WHAT THIS ADDS: the reason A2A exists at all.
-
-Steps 2 and 4 served agents you own. This one is different in kind. The SfMC Monitoring &
-Observability CoE owns the alert baseline for each Azure service. Your desk needs to ask
-it a question. You must not need a copy of their prompts; they must not need access to
-your engagement's data. Different team, different Foundry project, different data boundary.
-
-Run in its own terminal and LEAVE IT RUNNING:
-    python src/step7_coe_a2a_server.py
-
-Then ask it something, from step 3's client pattern or directly:
-    python -c "import asyncio,sys; sys.path.insert(0,'src'); from common import URL_COE, ask_a2a; \
-asyncio.run(ask_a2a(URL_COE, 'Baseline for a public API tier behind Front Door with AKS compute?'))"
-"""
-
+import narrate
 from common import (
     COE_BASELINE, HOST, PORT_COE, URL_COE,
     agent_card, get_client, make, serve,
@@ -1064,6 +1607,23 @@ card = agent_card(
 
 
 def main():
+    narrate.step_header(
+        7, "The CoE Baseline Advisor — another team's agent",
+        adds="The reason A2A exists at all. Steps 2 and 4 served agents YOU own. This "
+             "one is different in kind: the Monitoring & Observability CoE owns the "
+             "alert baseline for each Azure service. Your desk needs to ask it a "
+             "question. You must not need a copy of their prompts; they must not need "
+             "access to your engagement's data.",
+        watch_for="Different team, different Foundry project, different data boundary. "
+                  "THAT - not convenience, not modularity - is what justifies an HTTP "
+                  "hop between two agents.",
+    )
+
+    narrate.event("defence in depth",
+                  "this agent REFUSES customer-identifying data even if a caller sends "
+                  "it - the caller redacts outbound, the callee refuses inbound")
+    narrate.event("leave this running", "step 10 calls this agent")
+
     agent = make(get_client(), "CoEBaselineAdvisor", COE_BASELINE)
     serve(agent, card, HOST, PORT_COE)
 
@@ -1072,12 +1632,11 @@ if __name__ == "__main__":
     main()
 
 # CHECK YOUR UNDERSTANDING
-# * Look at the question you send this agent in step 10. It contains no customer name, no
-#   subscription ID, no case URL. Crossing a team boundary is exactly where
-#   de-identification stops being a lab rule and becomes a control.
-# * In production this agent would be in a different tenant boundary with its own identity.
-#   What do you need on the wire before you would call it with real context? (Bearer token
-#   enforced, card signature verified, identity pinned, egress policy, Redactor outbound.)
+# * Look at the question step 10 sends here: no customer name, no subscription ID, no
+#   case URL. Crossing a team boundary is where de-identification stops being a lab
+#   rule and becomes a control.
+# * What would you need on the wire before calling this with real context? Bearer token
+#   enforced, card signature verified, identity pinned, egress policy, Redactor outbound.
 ```
 
 ### Run it
@@ -1122,72 +1681,69 @@ for the user between turns. Right for a support conversation; possibly a latency
 ### The code — `src/step8_handoff_orchestrator.py`
 
 ```python
-"""STEP 8 - Handoff: Intake routes a live incident, dynamically.
-
-WHAT THIS ADDS: the top box on the diagram - the orchestrator - and the "dynamic hand-off
-of tasks to specialist agents" arrow.
-
-There is NO orchestrator object here. Read that again. Intake is a participant that
-happens to hold the conversation, and when it decides a specialist should own the work it
-calls a generated tool - handoff_to_<target>. The routing decision is made by the model,
-inside the agent, not by code you wrote. That is what "decentralised" means.
-
-The most important line in this file is tcl_queue. In mission-critical support, some
-decisions are not the agent's to make: severity calls, customer commitments, anything
-contractual. The way you express that in a handoff architecture is a handoff target that
-is a human queue, not an agent. Design it in on day one.
-
-Run:  python src/step8_handoff_orchestrator.py
-"""
+"""STEP 8 - Handoff: Intake routes a live incident, dynamically."""
 
 import asyncio
 
-from agent_framework.orchestrations import HandoffBuilder
+import narrate
+from common import LIVE_INCIDENT, build_desk, build_handoff, get_client, run_workflow
 
-from common import LIVE_INCIDENT, build_desk, get_client
-
-MAX_HOPS = 4   # hop budget. Without it, two agents can hand back and forth forever.
+MAX_HOPS = 4
 
 
 async def main():
-    desk = build_desk(get_client())
-
-    workflow = (
-        HandoffBuilder(participants=[
-            desk["intake"], desk["signal"], desk["resilience"],
-            desk["cases"], desk["tcl_queue"],
-        ])
-        .set_coordinator(desk["intake"])
-        .add_handoff(desk["intake"], [desk["signal"], desk["resilience"],
-                                      desk["cases"], desk["tcl_queue"]])
-        .add_handoff(desk["signal"], [desk["cases"], desk["tcl_queue"]])
-        .add_handoff(desk["resilience"], [desk["intake"], desk["tcl_queue"]])
-        .add_handoff(desk["cases"], [desk["signal"], desk["tcl_queue"]])
-        .build()
+    narrate.step_header(
+        8, "Handoff — the model does the routing",
+        adds="The top box on the diagram: the orchestrator, and the 'dynamic hand-off' "
+             "arrow. There is NO orchestrator object in this code. Intake is a "
+             "participant that happens to hold the conversation, and when it decides a "
+             "specialist should own the work it CALLS A TOOL - handoff_to_<target>. "
+             "The routing decision is made by the model, inside the agent.",
+        watch_for="The handoff_to_<target> tool call, and Intake's stated REASON. Also "
+                  "note the TCL escalation queue in the graph: some decisions are not "
+                  "the agent's to make, and you express that as an edge to a human.",
     )
 
-    hops = 0
-    async for event in workflow.run_stream(LIVE_INCIDENT):
-        print(event)
-        if "handoff_to" in str(event):
-            hops += 1
-            if hops > MAX_HOPS:
-                print(f"\n!! hop budget of {MAX_HOPS} exceeded - stopping. In production "
-                      "this is where you escalate to a human, not retry.")
-                break
+    narrate.event("the incident", "public endpoint failing ~1 request in 10; on-call "
+                                  "wants to know within the hour where this belongs")
+
+    desk = build_desk(get_client())
+    workflow = build_handoff(
+        coordinator=desk["intake"],
+        specialists=[desk["signal"], desk["resilience"], desk["cases"]],
+        human_target=desk["tcl_queue"],
+    )
+
+    transcript = await run_workflow(workflow, LIVE_INCIDENT)
+    hops = transcript.count("handoff_to")
+
+    narrate.event("handoffs observed", f"{hops}  (budget {MAX_HOPS})")
+    if hops > MAX_HOPS:
+        narrate.event("HOP BUDGET EXCEEDED",
+                      "in production this is where you escalate to a human, not retry")
+
+    narrate.takeaway(
+        "DECENTRALISED. You defined what routing is POSSIBLE; the model decided what "
+        "actually happened. Compare group chat, where a central orchestrator picks.",
+        "This builder made three demands, and each is a design lesson: every agent "
+        "needs history persistence (a handoff is a tool call that short-circuits the "
+        "turn), you must name a START agent, and you must declare the GRAPH.",
+        "Handoff is the only built-in pattern INTERACTIVE BY DEFAULT - it pauses for "
+        "the user between turns. Right for a support conversation. At 2 a.m., maybe a "
+        "latency bug.",
+        "Ping-pong is the number-one handoff failure in production. That is what the "
+        "hop budget is for.",
+    )
+
+    narrate.ask(
+        "Does Intake's stated reason hold up, or did it route on a keyword?",
+        "Which of these agents should never trigger a customer-facing action without a "
+        "human in between - and how would you ENFORCE that rather than instruct it?",
+    )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# CHECK YOUR UNDERSTANDING
-# * Find the handoff_to_<target> tool call in the stream. Does Intake's stated reason hold
-#   up, or did it route on a keyword?
-# * Handoff is the only built-in pattern that is INTERACTIVE BY DEFAULT - it pauses for
-#   the user between turns. For a support conversation that is right. For a 2 a.m.
-#   incident, is it?
-# * Stretch: make two specialists hand back unconditionally and watch the hop budget catch
-#   the ping-pong. This is the number-one handoff failure in production.
 ```
 
 ### Run it
@@ -1231,27 +1787,12 @@ uncapped bill.**
 ### The code — `src/step9_group_chat.py`
 
 ```python
-"""STEP 9 - Group Chat: Reporter and Redactor refine until APPROVED.
-
-WHAT THIS ADDS: iterative refinement, and the difference between centralised and
-decentralised coordination.
-
-Star topology. An orchestrator sits in the middle and decides who speaks next, and every
-participant sees the full shared conversation - which is exactly what lets the Reporter
-act on the Redactor's corrections.
-
-One line to remember:
-    GROUP CHAT is centralised - an orchestrator picks the speaker.
-    HANDOFF    is decentralised - the current agent picks, by calling a tool.
-
-Run:  python src/step9_group_chat.py
-"""
+"""STEP 9 - Group Chat: Reporter and Redactor refine until the cap."""
 
 import asyncio
 
-from agent_framework.orchestrations import GroupChatBuilder
-
-from common import build_desk, get_client
+import narrate
+from common import build_desk, build_group_chat, get_client, run_workflow
 from step5_sequential_report import FINDINGS
 
 TASK = (
@@ -1259,31 +1800,49 @@ TASK = (
     "revise it until the Redactor approves it.\n\n" + FINDINGS
 )
 
+MAX_ROUNDS = 6
+
 
 async def main():
-    desk = build_desk(get_client())
-
-    workflow = (
-        GroupChatBuilder()
-        .participants([desk["reporter"], desk["redactor"]])
-        .set_round_robin_manager(max_iterations=6)     # hard stop. This is a budget.
-        .build()
+    narrate.step_header(
+        9, "Group Chat — refine until approved",
+        adds="Iterative refinement, and the difference between centralised and "
+             "decentralised coordination. A star topology: an orchestrator sits in the "
+             "middle and decides who speaks next, and every participant sees the full "
+             "shared conversation — which is exactly what lets the Reporter act on the "
+             "Redactor's corrections.",
+        watch_for=f"Draft, critique, revise — alternating turns, capped at {MAX_ROUNDS} "
+                  "rounds. Compare with step 5: same two agents, but here they LOOP. "
+                  "Sequential ran each agent once; group chat keeps going.",
     )
 
-    async for event in workflow.run_stream(TASK):
-        print(event)
+    desk = build_desk(get_client())
+    workflow = build_group_chat([desk["reporter"], desk["redactor"]],
+                                max_iterations=MAX_ROUNDS)
+    await run_workflow(workflow, TASK)
+
+    narrate.takeaway(
+        "GROUP CHAT is centralised — an orchestrator picks the speaker. HANDOFF is "
+        "decentralised — the current agent picks, by calling a tool. That is the whole "
+        "difference between the two patterns.",
+        "This builder has NO default orchestrator. You must pass orchestrator_agent, "
+        "orchestrator, or selection_func. That is deliberate: speaker selection IS the "
+        "design of a group chat, so the framework makes you state it.",
+        f"max_rounds={MAX_ROUNDS} is a BUDGET, not a tuning knob. An uncapped group "
+        "chat is an uncapped bill.",
+    )
+
+    narrate.ask(
+        "Re-run with max_iterations=2. The loop stops mid-refinement. Was that the "
+        "right budget, and how would you decide?",
+        "Round-robin keeps talking even after the Redactor says APPROVED. The "
+        "constructor takes a termination_condition — wire it up and watch the token "
+        "cost roughly halve.",
+    )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# CHECK YOUR UNDERSTANDING
-# * Re-run with max_iterations=2. The loop stops mid-refinement. An uncapped group chat is
-#   an uncapped bill - that number is a budget decision, not a tuning knob.
-# * Round-robin wastes a turn after APPROVED. Write a selection function that terminates
-#   on APPROVED and watch the token cost roughly halve.
-# * The Redactor is a PARTICIPANT WITH A VETO, not a filter bolted on at the end. Why does
-#   that placement matter for a mission-critical engagement?
 ```
 
 ### Run it
@@ -1318,33 +1877,14 @@ of boundary decisions**, and the code was almost incidental.
 ### The code — `src/step10_full_desk.py`
 
 ```python
-"""STEP 10 - Assemble the whole thing and produce the weekly review pack.
-
-WHAT THIS ADDS: nothing new. That is the point. This is the architecture diagram from the
-first slide, running end to end:
-
-    Orchestrator (this process, Foundry project A)
-      |-- A2A client  ->  Signal Agent        (A2A server, step 2, port 9001)
-      |-- A2A client  ->  CaseReview Agent    (A2A server, step 4, port 9002)
-      |-- A2A client  ->  CoE Baseline Advisor(A2A server, step 7, port 9003, other team)
-      `-- in-process  ->  Reporter + Redactor (Group Chat, step 9, no HTTP hop)
-
-BEFORE YOU RUN THIS, start all three servers, each in its own terminal:
-    python src/step2_signal_a2a_server.py
-    python src/step4_case_a2a_server.py
-    python src/step7_coe_a2a_server.py
-
-Then:
-    python src/step10_full_desk.py
-"""
+"""STEP 10 - Assemble the whole thing. This is the diagram from slide one, running."""
 
 import asyncio
 
-from agent_framework.orchestrations import GroupChatBuilder
-
+import narrate
 from common import (
     URL_CASES, URL_COE, URL_SIGNAL,
-    ask_a2a, build_desk, get_client,
+    ask_a2a, build_desk, build_group_chat, get_client, run_workflow,
 )
 
 WEEK_Q = (
@@ -1353,7 +1893,7 @@ WEEK_Q = (
     "Report what you see from your source."
 )
 
-# Deliberately de-identified: nothing here names a customer, a subscription or a person.
+# Deliberately de-identified: no customer, no subscription, no person.
 COE_Q = (
     "For a mission-critical public API tier behind Front Door with an AKS compute tier: "
     "what alert baseline should be in place, which signals should use dynamic thresholds "
@@ -1364,15 +1904,29 @@ COE_Q = (
 
 
 async def main():
-    # --- Gather: three remote agents over A2A, concurrently -------------------------
-    print("=== GATHERING FROM THREE A2A AGENTS ===\n")
+    narrate.step_header(
+        10, "The whole desk",
+        adds="Nothing new. That is the point. This is the architecture from the first "
+             "slide, running end to end: three agents reached over A2A - one owned by "
+             "another team - and two agents in your own process, because they did not "
+             "need a network hop.",
+        watch_for="The shape of it. Which agents got A2A and which stayed in-process "
+                  "IS the architecture. The code is almost incidental.",
+    )
+
+    narrate.event("prerequisite", "steps 2, 4 and 7 must be running on ports 9001/9002/9003")
+    narrate.event("gathering", "three A2A calls, concurrently")
+
     signal, cases, baseline = await asyncio.gather(
         ask_a2a(URL_SIGNAL, WEEK_Q, "desk-signal", verbose=False),
         ask_a2a(URL_CASES, WEEK_Q, "desk-cases", verbose=False),
         ask_a2a(URL_COE, COE_Q, "desk-coe", verbose=False),
     )
-    for label, text in (("SIGNAL", signal), ("CASES", cases), ("CoE BASELINE", baseline)):
-        print(f"\n--- {label} ---\n{text[:1200]}")
+
+    narrate.turn("Signal", signal, "remote, over A2A — port 9001")
+    narrate.turn("CaseReview", cases, "remote, over A2A — port 9002")
+    narrate.turn("CoE Baseline Advisor", baseline,
+                 "ANOTHER TEAM's Foundry project — port 9003")
 
     findings = (
         "FINDINGS for CUSTOMER-A (gathered over A2A):\n\n"
@@ -1381,37 +1935,34 @@ async def main():
         f"[CoE recommended baseline]\n{baseline}"
     )
 
-    # --- Write and gate: in-process group chat, until APPROVED ----------------------
-    print("\n\n=== WRITING AND GATING THE REVIEW PACK ===\n")
+    narrate.event("writing and gating", "in-process group chat, no HTTP hop")
+
     desk = build_desk(get_client())
-    workflow = (
-        GroupChatBuilder()
-        .participants([desk["reporter"], desk["redactor"]])
-        .set_round_robin_manager(max_iterations=6)
-        .build()
+    workflow = build_group_chat([desk["reporter"], desk["redactor"]], max_iterations=6)
+    await run_workflow(
+        workflow,
+        "Write the weekly service review pack for CUSTOMER-A from these findings, then "
+        "revise until the Redactor approves.\n\n" + findings,
     )
 
-    async for event in workflow.run_stream(
-        "Write the weekly service review pack for CUSTOMER-A from these findings, then "
-        "revise until the Redactor approves.\n\n" + findings
-    ):
-        print(event)
+    narrate.takeaway(
+        "You just replaced a few hours of manual work across four disconnected systems "
+        "with one run - and every figure is traceable to the agent that found it.",
+        "Three agents were remote because they belonged elsewhere. Two were local "
+        "because they did not. THAT decision was the architecture.",
+        "The Redactor ran on the OUTBOUND path. Nothing left the desk unchecked.",
+    )
+
+    narrate.ask(
+        "Where should the Redactor have run relative to the A2A calls - before, after, "
+        "or both?",
+        "Which of these five agents could you delete tomorrow without the pack getting "
+        "worse? That question is the whole discipline of multi-agent design.",
+    )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# LOOK AT WHAT YOU BUILT
-# * Three agents you reach over an open protocol - one of them owned by another team - and
-#   two agents in your own process, because they did not need a network hop.
-# * The decision about WHICH agents got A2A and which stayed in-process is the actual
-#   architecture. The code is almost incidental.
-#
-# CHECK YOUR UNDERSTANDING
-# * You just sent findings across a team boundary. Where should the Redactor have run -
-#   before the A2A calls, after them, or both? (Answer: outbound, before anything leaves.)
-# * Which of these five agents could you delete tomorrow without the pack getting worse?
-#   That question is the whole discipline of multi-agent design.
 ```
 
 ### Run it

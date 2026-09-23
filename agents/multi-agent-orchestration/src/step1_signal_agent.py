@@ -1,17 +1,9 @@
-"""STEP 1 - A plain agent on Foundry. No protocol, no orchestration, nothing clever.
-
-WHAT THIS ADDS: the first box on our architecture diagram - one working specialist.
-WHAT IT DOES NOT HAVE YET: any way for another agent to call it.
-
-This is deliberately the smallest thing that works. If you cannot get this to run, none
-of the later steps will, so fix it here.
-
-Run:  python src/step1_signal_agent.py
-"""
+"""STEP 1 - A plain agent on Foundry. No protocol. No orchestration."""
 
 import asyncio
 
-from common import SIGNAL, get_client, get_monitor_signals, make
+import narrate
+from common import SIGNAL, get_client, get_monitor_signals, make, sdk_flavour
 
 QUESTION = (
     "For FY27-W12 on CUSTOMER-A: which alerts are real signal and which are noise, "
@@ -20,26 +12,41 @@ QUESTION = (
 
 
 async def main():
-    client = get_client()
+    narrate.step_header(
+        1, "One agent, one tool",
+        adds="The first box on our architecture diagram - a single working specialist. "
+             "No protocol, no orchestration, nothing clever. This is deliberately the "
+             "smallest thing that works: if this does not run, nothing later will.",
+        watch_for="The agent reads a week of synthetic Azure Monitor data and separates "
+                  "SIGNAL from NOISE. Watch whether it JUSTIFIES each call - an agent "
+                  "that cannot say why is not usable in mission-critical support.",
+    )
 
-    # One agent. One tool. That is the entire Foundry surface area you need today.
-    signal = make(client, "Signal", SIGNAL, [get_monitor_signals])
+    narrate.event("SDK in use", sdk_flavour())
+    narrate.event("the week", "CUSTOMER-A, FY27-W12 - 5xx errors since Tuesday, "
+                              "latency up, no deployment")
 
+    signal = make(get_client(), "Signal", SIGNAL, [get_monitor_signals])
     result = await signal.run(QUESTION)
-    print(result)
+
+    narrate.turn("Signal", str(result), "one agent, one tool, no orchestration")
+
+    narrate.takeaway(
+        "You authenticated to a Foundry project with Entra ID. There is no API key "
+        "anywhere in this repo.",
+        "The model chose to call get_monitor_signals because its DESCRIPTION said it "
+        "could. Tool selection is a writing problem before it is a coding problem.",
+        "Nothing here is multi-agent yet - and for this one question, it did not need "
+        "to be. That is the discipline: add an agent only when you can name the "
+        "expertise, the trust boundary, or the parallelism it buys you.",
+    )
+
+    narrate.ask(
+        "AKS-NodePool-CPU-High fired 228 times. Did the agent call it noise, and did "
+        "it say WHY?",
+        "Would a second agent have made this particular answer better? Be honest.",
+    )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# WHAT JUST HAPPENED
-# 1. You authenticated to a Foundry project with Entra ID - no key anywhere.
-# 2. The model called your get_monitor_signals tool because its description said it could.
-# 3. It read synthetic alert data and separated signal from noise.
-#
-# CHECK YOUR UNDERSTANDING
-# * The agent found AKS-NodePool-CPU-High firing 228 times. Did it call that signal or
-#   noise, and did it say WHY? An agent that cannot justify a conclusion is not usable
-#   in mission-critical support.
-# * Nothing here is multi-agent yet. Ask yourself honestly: for this one question, would
-#   a second agent have made the answer better?

@@ -1,66 +1,63 @@
-"""STEP 8 - Handoff: Intake routes a live incident, dynamically.
-
-WHAT THIS ADDS: the top box on the diagram - the orchestrator - and the "dynamic hand-off
-of tasks to specialist agents" arrow.
-
-There is NO orchestrator object here. Read that again. Intake is a participant that
-happens to hold the conversation, and when it decides a specialist should own the work it
-calls a generated tool - handoff_to_<target>. The routing decision is made by the model,
-inside the agent, not by code you wrote. That is what "decentralised" means.
-
-The most important line in this file is tcl_queue. In mission-critical support, some
-decisions are not the agent's to make: severity calls, customer commitments, anything
-contractual. The way you express that in a handoff architecture is a handoff target that
-is a human queue, not an agent. Design it in on day one.
-
-Run:  python src/step8_handoff_orchestrator.py
-"""
+"""STEP 8 - Handoff: Intake routes a live incident, dynamically."""
 
 import asyncio
 
-from agent_framework.orchestrations import HandoffBuilder
+import narrate
+from common import LIVE_INCIDENT, build_desk, build_handoff, get_client, run_workflow
 
-from common import LIVE_INCIDENT, build_desk, get_client
-
-MAX_HOPS = 4   # hop budget. Without it, two agents can hand back and forth forever.
+MAX_HOPS = 4
 
 
 async def main():
-    desk = build_desk(get_client())
-
-    workflow = (
-        HandoffBuilder(participants=[
-            desk["intake"], desk["signal"], desk["resilience"],
-            desk["cases"], desk["tcl_queue"],
-        ])
-        .set_coordinator(desk["intake"])
-        .add_handoff(desk["intake"], [desk["signal"], desk["resilience"],
-                                      desk["cases"], desk["tcl_queue"]])
-        .add_handoff(desk["signal"], [desk["cases"], desk["tcl_queue"]])
-        .add_handoff(desk["resilience"], [desk["intake"], desk["tcl_queue"]])
-        .add_handoff(desk["cases"], [desk["signal"], desk["tcl_queue"]])
-        .build()
+    narrate.step_header(
+        8, "Handoff — the model does the routing",
+        adds="The top box on the diagram: the orchestrator, and the 'dynamic hand-off' "
+             "arrow. There is NO orchestrator object in this code. Intake is a "
+             "participant that happens to hold the conversation, and when it decides a "
+             "specialist should own the work it CALLS A TOOL - handoff_to_<target>. "
+             "The routing decision is made by the model, inside the agent.",
+        watch_for="The handoff_to_<target> tool call, and Intake's stated REASON. Also "
+                  "note the TCL escalation queue in the graph: some decisions are not "
+                  "the agent's to make, and you express that as an edge to a human.",
     )
 
-    hops = 0
-    async for event in workflow.run_stream(LIVE_INCIDENT):
-        print(event)
-        if "handoff_to" in str(event):
-            hops += 1
-            if hops > MAX_HOPS:
-                print(f"\n!! hop budget of {MAX_HOPS} exceeded - stopping. In production "
-                      "this is where you escalate to a human, not retry.")
-                break
+    narrate.event("the incident", "public endpoint failing ~1 request in 10; on-call "
+                                  "wants to know within the hour where this belongs")
+
+    desk = build_desk(get_client())
+    workflow = build_handoff(
+        coordinator=desk["intake"],
+        specialists=[desk["signal"], desk["resilience"], desk["cases"]],
+        human_target=desk["tcl_queue"],
+    )
+
+    transcript = await run_workflow(workflow, LIVE_INCIDENT)
+    hops = transcript.count("handoff_to")
+
+    narrate.event("handoffs observed", f"{hops}  (budget {MAX_HOPS})")
+    if hops > MAX_HOPS:
+        narrate.event("HOP BUDGET EXCEEDED",
+                      "in production this is where you escalate to a human, not retry")
+
+    narrate.takeaway(
+        "DECENTRALISED. You defined what routing is POSSIBLE; the model decided what "
+        "actually happened. Compare group chat, where a central orchestrator picks.",
+        "This builder made three demands, and each is a design lesson: every agent "
+        "needs history persistence (a handoff is a tool call that short-circuits the "
+        "turn), you must name a START agent, and you must declare the GRAPH.",
+        "Handoff is the only built-in pattern INTERACTIVE BY DEFAULT - it pauses for "
+        "the user between turns. Right for a support conversation. At 2 a.m., maybe a "
+        "latency bug.",
+        "Ping-pong is the number-one handoff failure in production. That is what the "
+        "hop budget is for.",
+    )
+
+    narrate.ask(
+        "Does Intake's stated reason hold up, or did it route on a keyword?",
+        "Which of these agents should never trigger a customer-facing action without a "
+        "human in between - and how would you ENFORCE that rather than instruct it?",
+    )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# CHECK YOUR UNDERSTANDING
-# * Find the handoff_to_<target> tool call in the stream. Does Intake's stated reason hold
-#   up, or did it route on a keyword?
-# * Handoff is the only built-in pattern that is INTERACTIVE BY DEFAULT - it pauses for
-#   the user between turns. For a support conversation that is right. For a 2 a.m.
-#   incident, is it?
-# * Stretch: make two specialists hand back unconditionally and watch the hop budget catch
-#   the ping-pong. This is the number-one handoff failure in production.

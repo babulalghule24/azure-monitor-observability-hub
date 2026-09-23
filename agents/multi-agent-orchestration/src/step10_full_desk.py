@@ -1,30 +1,11 @@
-"""STEP 10 - Assemble the whole thing and produce the weekly review pack.
-
-WHAT THIS ADDS: nothing new. That is the point. This is the architecture diagram from the
-first slide, running end to end:
-
-    Orchestrator (this process, Foundry project A)
-      |-- A2A client  ->  Signal Agent        (A2A server, step 2, port 9001)
-      |-- A2A client  ->  CaseReview Agent    (A2A server, step 4, port 9002)
-      |-- A2A client  ->  CoE Baseline Advisor(A2A server, step 7, port 9003, other team)
-      `-- in-process  ->  Reporter + Redactor (Group Chat, step 9, no HTTP hop)
-
-BEFORE YOU RUN THIS, start all three servers, each in its own terminal:
-    python src/step2_signal_a2a_server.py
-    python src/step4_case_a2a_server.py
-    python src/step7_coe_a2a_server.py
-
-Then:
-    python src/step10_full_desk.py
-"""
+"""STEP 10 - Assemble the whole thing. This is the diagram from slide one, running."""
 
 import asyncio
 
-from agent_framework.orchestrations import GroupChatBuilder
-
+import narrate
 from common import (
     URL_CASES, URL_COE, URL_SIGNAL,
-    ask_a2a, build_desk, get_client,
+    ask_a2a, build_desk, build_group_chat, get_client, run_workflow,
 )
 
 WEEK_Q = (
@@ -33,7 +14,7 @@ WEEK_Q = (
     "Report what you see from your source."
 )
 
-# Deliberately de-identified: nothing here names a customer, a subscription or a person.
+# Deliberately de-identified: no customer, no subscription, no person.
 COE_Q = (
     "For a mission-critical public API tier behind Front Door with an AKS compute tier: "
     "what alert baseline should be in place, which signals should use dynamic thresholds "
@@ -44,15 +25,29 @@ COE_Q = (
 
 
 async def main():
-    # --- Gather: three remote agents over A2A, concurrently -------------------------
-    print("=== GATHERING FROM THREE A2A AGENTS ===\n")
+    narrate.step_header(
+        10, "The whole desk",
+        adds="Nothing new. That is the point. This is the architecture from the first "
+             "slide, running end to end: three agents reached over A2A - one owned by "
+             "another team - and two agents in your own process, because they did not "
+             "need a network hop.",
+        watch_for="The shape of it. Which agents got A2A and which stayed in-process "
+                  "IS the architecture. The code is almost incidental.",
+    )
+
+    narrate.event("prerequisite", "steps 2, 4 and 7 must be running on ports 9001/9002/9003")
+    narrate.event("gathering", "three A2A calls, concurrently")
+
     signal, cases, baseline = await asyncio.gather(
         ask_a2a(URL_SIGNAL, WEEK_Q, "desk-signal", verbose=False),
         ask_a2a(URL_CASES, WEEK_Q, "desk-cases", verbose=False),
         ask_a2a(URL_COE, COE_Q, "desk-coe", verbose=False),
     )
-    for label, text in (("SIGNAL", signal), ("CASES", cases), ("CoE BASELINE", baseline)):
-        print(f"\n--- {label} ---\n{text[:1200]}")
+
+    narrate.turn("Signal", signal, "remote, over A2A — port 9001")
+    narrate.turn("CaseReview", cases, "remote, over A2A — port 9002")
+    narrate.turn("CoE Baseline Advisor", baseline,
+                 "ANOTHER TEAM's Foundry project — port 9003")
 
     findings = (
         "FINDINGS for CUSTOMER-A (gathered over A2A):\n\n"
@@ -61,34 +56,31 @@ async def main():
         f"[CoE recommended baseline]\n{baseline}"
     )
 
-    # --- Write and gate: in-process group chat, until APPROVED ----------------------
-    print("\n\n=== WRITING AND GATING THE REVIEW PACK ===\n")
+    narrate.event("writing and gating", "in-process group chat, no HTTP hop")
+
     desk = build_desk(get_client())
-    workflow = (
-        GroupChatBuilder()
-        .participants([desk["reporter"], desk["redactor"]])
-        .set_round_robin_manager(max_iterations=6)
-        .build()
+    workflow = build_group_chat([desk["reporter"], desk["redactor"]], max_iterations=6)
+    await run_workflow(
+        workflow,
+        "Write the weekly service review pack for CUSTOMER-A from these findings, then "
+        "revise until the Redactor approves.\n\n" + findings,
     )
 
-    async for event in workflow.run_stream(
-        "Write the weekly service review pack for CUSTOMER-A from these findings, then "
-        "revise until the Redactor approves.\n\n" + findings
-    ):
-        print(event)
+    narrate.takeaway(
+        "You just replaced a few hours of manual work across four disconnected systems "
+        "with one run - and every figure is traceable to the agent that found it.",
+        "Three agents were remote because they belonged elsewhere. Two were local "
+        "because they did not. THAT decision was the architecture.",
+        "The Redactor ran on the OUTBOUND path. Nothing left the desk unchecked.",
+    )
+
+    narrate.ask(
+        "Where should the Redactor have run relative to the A2A calls - before, after, "
+        "or both?",
+        "Which of these five agents could you delete tomorrow without the pack getting "
+        "worse? That question is the whole discipline of multi-agent design.",
+    )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# LOOK AT WHAT YOU BUILT
-# * Three agents you reach over an open protocol - one of them owned by another team - and
-#   two agents in your own process, because they did not need a network hop.
-# * The decision about WHICH agents got A2A and which stayed in-process is the actual
-#   architecture. The code is almost incidental.
-#
-# CHECK YOUR UNDERSTANDING
-# * You just sent findings across a team boundary. Where should the Redactor have run -
-#   before the A2A calls, after them, or both? (Answer: outbound, before anything leaves.)
-# * Which of these five agents could you delete tomorrow without the pack getting worse?
-#   That question is the whole discipline of multi-agent design.

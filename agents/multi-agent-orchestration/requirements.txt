@@ -1,12 +1,31 @@
 # Microsoft Foundry (Azure AI Foundry) + Microsoft Agent Framework, Python
+#
+# If an import fails, run:  python src/_doctor.py
+# It prints exactly what your installed version exposes.
+
 agent-framework
-agent-framework-orchestrations
+agent-framework-foundry          # FoundryChatClient — the current Foundry provider
+agent-framework-orchestrations   # SequentialBuilder, ConcurrentBuilder, HandoffBuilder, GroupChatBuilder
+
+azure-identity                   # DefaultAzureCredential / AzureCliCredential (aio)
 azure-ai-projects
-azure-identity
 python-dotenv
 pydantic
 
-# Exercise 4 (A2A)
-a2a-sdk
+# --- A2A ----------------------------------------------------------------------------
+# PINNED to the 0.3 line on purpose.
+#
+# a2a-sdk 1.0 migrated its types from Pydantic to Protobuf, which is a breaking change:
+#   * AgentCard.url removed (replaced by icon_url + supported_interfaces)
+#   * Part(root=TextPart(text=...))  ->  Part(text=...)
+#   * Role.user -> Role.ROLE_USER, TaskState.submitted -> TaskState.TASK_STATE_SUBMITTED
+#   * server setup moved to Starlette route factories
+#
+# The PROTOCOL concepts this lab teaches are identical on both: agent cards, discovery,
+# the task lifecycle, and opacity across a trust boundary. The 0.3 line keeps the lab
+# code readable and stable. If you want to run against 1.0, see the migration guide:
+#   https://github.com/a2aproject/a2a-python/blob/main/docs/migrations/v1_0/README.md
+a2a-sdk<1.0
+
 uvicorn
 httpx

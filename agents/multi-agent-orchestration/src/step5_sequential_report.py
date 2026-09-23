@@ -1,21 +1,9 @@
-"""STEP 5 - Sequential: findings -> Reporter -> Redactor.
-
-WHAT THIS ADDS: the first ORCHESTRATION pattern, and the in-process side box on the
-diagram. Note these two agents are NOT A2A - they are in the same process, so putting
-HTTP between them would cost latency and buy nothing.
-
-Sequential is a pipeline: fixed order, you wrote the order, each agent consumes what the
-previous one produced. Here, order is the whole point. The Reporter cannot write before
-the findings exist, and nothing leaves the desk before the Redactor has seen it.
-
-Run:  python src/step5_sequential_report.py
-"""
+"""STEP 5 - Sequential: findings -> Reporter -> Redactor."""
 
 import asyncio
 
-from agent_framework.orchestrations import SequentialBuilder
-
-from common import build_desk, get_client
+import narrate
+from common import build_desk, build_sequential, get_client, run_workflow
 
 FINDINGS = (
     "FINDINGS for CUSTOMER-A, FY27-W12 (synthetic):\n"
@@ -32,26 +20,42 @@ FINDINGS = (
 
 
 async def main():
-    desk = build_desk(get_client())
-
-    workflow = (
-        SequentialBuilder()
-        .participants([desk["reporter"], desk["redactor"]])
-        .build()
+    narrate.step_header(
+        5, "Sequential — write it, then gate it",
+        adds="The first orchestration pattern, and the confidentiality gate. These two "
+             "agents are IN-PROCESS, not A2A — same process, no HTTP hop, because they "
+             "do not need one. Order is the whole point: the Reporter cannot write "
+             "before the findings exist, and nothing leaves the desk before the "
+             "Redactor has seen it.",
+        watch_for="Two turns, in a fixed order you wrote. The Reporter drafts the "
+                  "customer-ready summary; the Redactor either approves it or returns "
+                  "numbered corrections. The Redactor sees the ORIGINAL findings too, "
+                  "which is how it can catch a number that was never in them.",
     )
 
-    async for event in workflow.run_stream(FINDINGS):
-        print(event)
+    desk = build_desk(get_client())
+    workflow = build_sequential([desk["reporter"], desk["redactor"]])
+    await run_workflow(workflow, FINDINGS)
+
+    narrate.takeaway(
+        "Sequential is a pipeline: fixed order, each agent consumes what the previous "
+        "one produced. If you were about to write a for-loop over your agents, this is "
+        "that loop — plus streaming events and tool approval for free.",
+        "By default every agent sees the WHOLE conversation, not just the last message. "
+        "Correct here, because the Redactor must check the draft against the findings. "
+        "For a pure transform stage, chain_only_agent_responses=True costs fewer tokens.",
+        "The Redactor is a first-class agent with a veto, not a filter bolted on at the "
+        "end. That placement is the architecture, not a detail.",
+    )
+
+    narrate.ask(
+        "Add 'contact is Jane Doe, jane@example.com' to FINDINGS and re-run. Does the "
+        "Redactor refuse? If not, your gate is decorative — and a prompt alone is not "
+        "a control.",
+        "Which stage here would you restrict with chain_only_agent_responses=True, and "
+        "what would it save you?",
+    )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# CHECK YOUR UNDERSTANDING
-# * By default each agent sees the WHOLE conversation, not just the last message. Good
-#   here - the Redactor must check the draft against the original findings. For a pure
-#   transform stage, SequentialBuilder offers chain_only_agent_responses=True. When would
-#   you want that, and what does it save?
-# * Try breaking the gate: add "contact is Jane Doe, jane@example.com" to FINDINGS and
-#   re-run. The Redactor MUST refuse. If it does not, your gate is decorative - and you
-#   have just learned that a prompt alone is not a control.
